@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CertBaton.Application/CertBaton.Application.csproj" />
+    <Project Path="src/CertBaton.Contracts/CertBaton.Contracts.csproj" />
+    <Project Path="src/CertBaton.Ctl/CertBaton.Ctl.csproj" />
+    <Project Path="src/CertBaton.Desktop/CertBaton.Desktop.csproj" />
+    <Project Path="src/CertBaton.Domain/CertBaton.Domain.csproj" />
+    <Project Path="src/CertBaton.Ipc.NamedPipes/CertBaton.Ipc.NamedPipes.csproj" />
+    <Project Path="src/CertBaton.Service/CertBaton.Service.csproj" />
+    <Project Path="src/CertBaton.Verification/CertBaton.Verification.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CertBaton.ProtocolIntegrationTests/CertBaton.ProtocolIntegrationTests.csproj" />
+    <Project Path="tests/CertBaton.UnitTests/CertBaton.UnitTests.csproj" />
+  </Folder>
+</Solution>

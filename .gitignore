@@ -1,0 +1,58 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+[Tt]est[Rr]esults/
+*.trx
+*.coverage
+*.coveragexml
+
+# IDE and user state
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Packages and tools
+packages/
+.store/
+
+# Publish and installer output
+publish/
+installer/output/
+*.msi
+*.msix
+
+# Logs, databases, secrets, and certificate material
+*.log
+*.db
+*.db-shm
+*.db-wal
+*.pfx
+*.p12
+*.pem
+*.key
+*.ppk
+*.cer
+*.crt
+*.csr
+*.jks
+*.keystore
+*.kdbx
+*.env
+appsettings.Local.json
+secrets.json
+**/.ssh/
+
+# Local infrastructure and private test-site material
+work/
+private/
+.certbaton/
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store

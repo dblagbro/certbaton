@@ -1,0 +1,21 @@
+CertBaton third-party notices
+
+This source tree directly references the following packages. Their package
+metadata declares the MIT license:
+
+- CommunityToolkit.Mvvm 8.4.2
+  Project: https://github.com/CommunityToolkit/dotnet
+- Microsoft.Extensions.Hosting 10.0.10
+  Project: https://github.com/dotnet/dotnet
+- Microsoft.Extensions.Hosting.WindowsServices 10.0.10
+  Project: https://github.com/dotnet/dotnet
+- MSTest 4.3.3
+  Project: https://github.com/microsoft/testfx
+
+The authoritative package graph is recorded by the committed NuGet lock files.
+Before distributing any CertBaton binary or installer, the release process must
+generate a complete software bill of materials and include every license and
+notice required by the resolved transitive dependencies and bundled runtime.
+
+This notice is informational and does not replace the license terms supplied by
+each third-party project.

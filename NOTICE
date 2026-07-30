@@ -1,0 +1,12 @@
+CertBaton
+Copyright 2026 CertBaton contributors
+
+This product is licensed under the Apache License, Version 2.0.
+
+Third-party components, if distributed with CertBaton, remain subject to their
+respective licenses and attribution requirements. Distribution packages must
+include all notices required by those components.
+
+The source dependency summary is in THIRD-PARTY-NOTICES.txt. Release packages
+must replace or supplement it with the complete resolved dependency and bundled
+runtime notices.

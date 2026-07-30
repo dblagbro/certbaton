@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CertBaton.Contracts\CertBaton.Contracts.csproj" />
+    <ProjectReference Include="..\CertBaton.Ipc.NamedPipes\CertBaton.Ipc.NamedPipes.csproj" />
+  </ItemGroup>
+
+</Project>

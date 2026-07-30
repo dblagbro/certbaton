@@ -1,0 +1,48 @@
+name: Design proposal
+description: Propose a bounded capability or architecture change
+title: "[Design]: "
+labels:
+  - design
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start with the roadmap, P0 backlog, supported matrix, and architecture decisions. A popular request does not automatically expand the supported or security boundary.
+  - type: textarea
+    id: user
+    attributes:
+      label: User and problem
+      description: Who needs this and what certificate-operation problem are they facing?
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Proposed boundary
+      description: State what the change will and will not control, store, or execute.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and recovery
+      description: Identify secrets, trust decisions, privileges, failure modes, rollback, and independent verification.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Acceptance evidence
+      description: Give measurable positive, negative, interruption, and rollback tests.
+    validations:
+      required: true
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Suggested phase
+      options:
+        - P0 backlog
+        - P1 or later
+        - Research only
+    validations:
+      required: true
