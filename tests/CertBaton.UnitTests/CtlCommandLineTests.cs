@@ -13,7 +13,7 @@ public sealed class CtlCommandLineTests
         using var error = new StringWriter();
         var serviceContacted = false;
 
-        var exitCode = await Program.RunAsync(
+        var exitCode = await CertBaton.Ctl.Program.RunAsync(
             ["health", "--unknown"],
             output,
             error,
@@ -36,7 +36,7 @@ public sealed class CtlCommandLineTests
         using var output = new StringWriter();
         using var error = new StringWriter();
 
-        var exitCode = await Program.RunAsync(
+        var exitCode = await CertBaton.Ctl.Program.RunAsync(
             ["--help", "--unknown"],
             output,
             error);

@@ -10,18 +10,23 @@ The project is in **pre-alpha development**. It cannot yet issue, deploy, renew,
 or recover a production certificate. There are no supported releases, and the
 current code must not be used on a production website.
 
-What works today is deliberately small: the solution builds on .NET 10, the
-service host can start in console development mode, and integration tests can
-complete a bounded, versioned health exchange over an ACL-protected named pipe.
-Clients validate the connected server PID against the process registered for
-the `CertBaton` Windows service before sending a request; the server reads the
-caller's SID using an Identification-level token. Automated tests use a
-current-user development profile and a test-only expected-PID pin, and cover a
-pipe-name squatter being rejected before it receives request data. There is no
-installer yet, so the real SCM registration, exact service-SID DACL, and
-desktop/CLI installed-service path remain unqualified release gates. The
-desktop and CLI deliberately do not trust an ordinary console process.
-Certificate operations and credential persistence do not exist yet.
+What works today is deliberately synthetic: the service owns and durably
+records an eight-stage simulated renewal, continues accepted work after the
+desktop closes, recovers an interrupted run without reporting false success,
+and exposes typed start/latest snapshots over the versioned named-pipe
+protocol. The desktop labels this as a developer-only simulation, supports one
+injected failure stage, and displays the persisted evidence timeline. No ACME,
+SSH/SFTP, certificate, private-key, credential, remote-host, or production
+deployment operation is performed.
+
+The named-pipe foundation validates the connected server process against the
+SCM registration, identifies callers with an Identification-level Windows
+token, bounds messages, and rejects a pipe-name squatter before sending request
+data. Automated tests use a current-user development profile. There is no
+installer yet, so real SCM registration, service/storage ACLs, the installed
+desktop/CLI path, restart behavior, and clean-machine qualification remain
+release gates. Production desktop and CLI clients deliberately do not trust an
+ordinary console process.
 
 ## Why CertBaton
 
@@ -93,8 +98,9 @@ The ordered implementation work and release evidence are in the
 The client foundation uses .NET 10, WPF, and a Windows Service host.
 UI-to-service communication uses a bounded, versioned named-pipe protocol with
 Windows-token caller identification and SCM-backed server-process validation.
-Durable certificate state is planned locally, and secret storage is gated on
-the Windows identity and DPAPI-NG spike described in
+Increment 1 persists only synthetic job state and non-secret evidence in local
+SQLite. Durable certificate state remains planned, and secret storage is gated
+on the Windows identity and DPAPI-NG spike described in
 [ADR 0003](docs/architecture/adr/0003-secret-protection-spike.md).
 
 Key decisions are recorded in
@@ -145,8 +151,11 @@ Windows Service or authorize production use.
 
 ### Test fixtures
 
-Automated local fixtures and the Let's Encrypt staging environment are the
-default test targets. Any test involving a publicly reachable website requires:
+The [disposable local target](docs/fixtures/local-target.md) and the Let's
+Encrypt staging environment are the default integration targets. The local
+target scaffold is present, but its container runtime smoke test remains
+pending a local Docker engine. Any test involving a publicly reachable website
+requires:
 
 - explicit owner authorization;
 - a declared maintenance window;

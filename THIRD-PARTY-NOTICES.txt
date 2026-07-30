@@ -9,8 +9,19 @@ metadata declares the MIT license:
   Project: https://github.com/dotnet/dotnet
 - Microsoft.Extensions.Hosting.WindowsServices 10.0.10
   Project: https://github.com/dotnet/dotnet
+- Microsoft.Data.Sqlite.Core 10.0.10
+  Project: https://github.com/dotnet/efcore
 - MSTest 4.3.3
   Project: https://github.com/microsoft/testfx
+
+This source tree also directly references:
+
+- SQLitePCLRaw.bundle_e_sqlite3 2.1.12
+  License: Apache-2.0
+  Project: https://github.com/ericsink/SQLitePCL.raw
+- SQLitePCLRaw.lib.e_sqlite3 3.53.3
+  License: SQLite public domain dedication
+  Project: https://sqlite.org/
 
 The authoritative package graph is recorded by the committed NuGet lock files.
 Before distributing any CertBaton binary or installer, the release process must

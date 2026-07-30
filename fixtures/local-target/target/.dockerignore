@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!nginx.conf
+!sshd_config
+!doas.conf
+!entrypoint.sh
+!certbaton-fixture-control
+!fixture-inject
+!fixture-healthcheck

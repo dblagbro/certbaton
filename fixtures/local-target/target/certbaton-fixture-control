@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+readonly root=/srv/certbaton
+readonly active="$root/tls/active"
+readonly backup="$root/tls/backup"
+readonly staging="$root/tls/staging"
+readonly reload_plan="$root/inject/reload-plan"
+
+[[ "$(id -u)" -eq 0 ]] || {
+    printf 'fixture control must run through its constrained doas rule\n' >&2
+    exit 77
+}
+
+[[ "$#" -eq 1 ]] || {
+    printf 'fixture control accepts exactly one typed verb\n' >&2
+    exit 64
+}
+
+require_bounded_regular_file() {
+    local path="$1"
+    local maximum="$2"
+    [[ -f "$path" && ! -L "$path" ]] || {
+        printf 'required regular file is missing: %s\n' "$path" >&2
+        exit 66
+    }
+
+    local size
+    size="$(stat -c '%s' "$path")"
+    [[ "$size" -gt 0 && "$size" -le "$maximum" ]] || {
+        printf 'file size is outside the fixture limit: %s\n' "$path" >&2
+        exit 65
+    }
+}
+
+validate_staged() {
+    require_bounded_regular_file "$staging/fullchain.pem" 262144
+    require_bounded_regular_file "$staging/privkey.pem" 65536
+
+    openssl x509 -in "$staging/fullchain.pem" -noout -checkend 1 >/dev/null
+    openssl pkey -in "$staging/privkey.pem" -noout -check >/dev/null
+
+    local cert_key_hash
+    local private_key_hash
+    cert_key_hash="$(
+        openssl x509 -in "$staging/fullchain.pem" -pubkey -noout |
+            openssl pkey -pubin -outform DER 2>/dev/null |
+            sha256sum |
+            cut -d' ' -f1
+    )"
+    private_key_hash="$(
+        openssl pkey -in "$staging/privkey.pem" -pubout -outform DER 2>/dev/null |
+            sha256sum |
+            cut -d' ' -f1
+    )"
+    [[ "$cert_key_hash" == "$private_key_hash" ]] || {
+        printf 'staged certificate and private key do not match\n' >&2
+        exit 65
+    }
+}
+
+pop_reload_action() {
+    local action=pass
+    if [[ -s "$reload_plan" ]]; then
+        IFS= read -r action <"$reload_plan"
+        tail -n +2 "$reload_plan" >"$reload_plan.next"
+        mv -f "$reload_plan.next" "$reload_plan"
+    fi
+    printf '%s' "$action"
+}
+
+case "${1:-}" in
+    paths)
+        printf '%s\n' \
+            'challenge=/srv/certbaton/webroot/.well-known/acme-challenge' \
+            'staging=/srv/certbaton/tls/staging' \
+            'active=/srv/certbaton/tls/active' \
+            'backup=/srv/certbaton/tls/backup'
+        ;;
+    validate-staged)
+        validate_staged
+        ;;
+    validate-config)
+        nginx -t -q -c /etc/nginx/nginx.conf
+        ;;
+    snapshot)
+        require_bounded_regular_file "$active/fullchain.pem" 262144
+        require_bounded_regular_file "$active/privkey.pem" 65536
+        install -o root -g root -m 0644 "$active/fullchain.pem" "$backup/fullchain.pem.next"
+        install -o root -g root -m 0600 "$active/privkey.pem" "$backup/privkey.pem.next"
+        mv -f "$backup/fullchain.pem.next" "$backup/fullchain.pem"
+        mv -f "$backup/privkey.pem.next" "$backup/privkey.pem"
+        ;;
+    activate-staged)
+        validate_staged
+        install -o root -g root -m 0644 "$staging/fullchain.pem" "$active/fullchain.pem.next"
+        install -o root -g root -m 0600 "$staging/privkey.pem" "$active/privkey.pem.next"
+        mv -f "$active/fullchain.pem.next" "$active/fullchain.pem"
+        mv -f "$active/privkey.pem.next" "$active/privkey.pem"
+        ;;
+    restore-snapshot)
+        require_bounded_regular_file "$backup/fullchain.pem" 262144
+        require_bounded_regular_file "$backup/privkey.pem" 65536
+        install -o root -g root -m 0644 "$backup/fullchain.pem" "$active/fullchain.pem.next"
+        install -o root -g root -m 0600 "$backup/privkey.pem" "$active/privkey.pem.next"
+        mv -f "$active/fullchain.pem.next" "$active/fullchain.pem"
+        mv -f "$active/privkey.pem.next" "$active/privkey.pem"
+        ;;
+    reload)
+        action="$(pop_reload_action)"
+        case "$action" in
+            pass)
+                nginx -s reload -c /etc/nginx/nginx.conf
+                ;;
+            fail)
+                printf 'injected fixture reload failure\n' >&2
+                exit 75
+                ;;
+            skip)
+                printf 'injected fixture stale endpoint: reload reported success but was skipped\n' >&2
+                ;;
+            *)
+                printf 'invalid fixture reload plan action\n' >&2
+                exit 78
+                ;;
+        esac
+        ;;
+    fingerprint)
+        require_bounded_regular_file "$active/fullchain.pem" 262144
+        openssl x509 -in "$active/fullchain.pem" -noout -fingerprint -sha256
+        ;;
+    *)
+        printf '%s\n' \
+            'usage: certbaton-fixture-control {' \
+            '  paths|validate-staged|validate-config|snapshot|' \
+            '  activate-staged|restore-snapshot|reload|fingerprint' \
+            '}' >&2
+        exit 64
+        ;;
+esac

@@ -13,6 +13,16 @@
 *.md text eol=lf
 *.txt text eol=lf
 *.ps1 text eol=lf
+*.sh text eol=lf
+*.conf text eol=lf
+Dockerfile text eol=lf
+
+# Container entrypoints and helpers without filename extensions must retain LF
+# on Windows clones.
+fixtures/local-target/target/certbaton-fixture-control text eol=lf
+fixtures/local-target/target/fixture-healthcheck text eol=lf
+fixtures/local-target/target/fixture-inject text eol=lf
+fixtures/local-target/target/sshd_config text eol=lf
 
 *.png binary
 *.jpg binary

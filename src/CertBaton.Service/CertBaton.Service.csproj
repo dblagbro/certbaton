@@ -12,6 +12,8 @@
   <ItemGroup>
     <ProjectReference Include="..\CertBaton.Application\CertBaton.Application.csproj" />
     <ProjectReference Include="..\CertBaton.Contracts\CertBaton.Contracts.csproj" />
+    <ProjectReference Include="..\CertBaton.Domain\CertBaton.Domain.csproj" />
     <ProjectReference Include="..\CertBaton.Ipc.NamedPipes\CertBaton.Ipc.NamedPipes.csproj" />
+    <ProjectReference Include="..\CertBaton.Persistence.Sqlite\CertBaton.Persistence.Sqlite.csproj" />
   </ItemGroup>
 </Project>
