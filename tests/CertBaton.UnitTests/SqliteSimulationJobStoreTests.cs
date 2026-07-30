@@ -455,11 +455,9 @@ public sealed class SqliteSimulationJobStoreTests
 
     private (SqliteSimulationJobStore Store, string DatabasePath) CreateStore()
     {
-        var directory = Path.Combine(
-            Path.GetTempPath(),
-            "CertBaton.UnitTests",
-            Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
-        Directory.CreateDirectory(directory);
+        var directory = Directory
+            .CreateTempSubdirectory("CertBaton.UnitTests-")
+            .FullName;
         testDirectories.Add(directory);
         var databasePath = Path.Combine(directory, "simulation.db");
         var store = new SqliteSimulationJobStore(databasePath);

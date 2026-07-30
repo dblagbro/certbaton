@@ -314,11 +314,7 @@ public sealed class SimulationServiceTests
     [TestMethod]
     public async Task CoordinatorClaimBeforeCancellationFinishesDurableCreation()
     {
-        var directory = Path.Combine(
-            Path.GetTempPath(),
-            "CertBaton.ServiceTests",
-            Guid.NewGuid().ToString("N"));
-        testDirectories.Add(directory);
+        var directory = CreateTestDirectory();
         var innerStore = new SqliteSimulationJobStore(
             Path.Combine(directory, "state.db"));
         var blockingStore = new BlockingCreateSimulationJobStore(innerStore);
@@ -464,11 +460,7 @@ public sealed class SimulationServiceTests
     private SimulationCoordinator CreateCoordinator(
         out SqliteSimulationJobStore store)
     {
-        var directory = Path.Combine(
-            Path.GetTempPath(),
-            "CertBaton.ServiceTests",
-            Guid.NewGuid().ToString("N"));
-        testDirectories.Add(directory);
+        var directory = CreateTestDirectory();
         store = new SqliteSimulationJobStore(
             Path.Combine(directory, "state.db"));
         var timeProvider = new IncrementingTimeProvider(
@@ -479,6 +471,15 @@ public sealed class SimulationServiceTests
             new SimulatedRenewalRunner(timeProvider),
             timeProvider,
             NullLogger<SimulationCoordinator>.Instance);
+    }
+
+    private string CreateTestDirectory()
+    {
+        var directory = Directory
+            .CreateTempSubdirectory("CertBaton.ServiceTests-")
+            .FullName;
+        testDirectories.Add(directory);
+        return directory;
     }
 
     private static async Task<SimulationJobDetails> WaitForTerminalAsync(
