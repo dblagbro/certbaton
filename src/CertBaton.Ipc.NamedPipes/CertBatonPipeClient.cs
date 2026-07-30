@@ -44,11 +44,37 @@ public sealed class CertBatonPipeClient
             IpcRequest.CreateHealth(timeProvider, options.ConnectTimeout),
             cancellationToken);
 
+    public Task<IpcResponse> GetLatestSimulationAsync(
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateSimulationLatest(
+                timeProvider,
+                options.ConnectTimeout),
+            cancellationToken);
+
+    public Task<IpcResponse> StartSimulationAsync(
+        Guid idempotencyKey,
+        string? failureStage = null,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateSimulationStart(
+                timeProvider,
+                idempotencyKey,
+                failureStage,
+                options.ConnectTimeout),
+            cancellationToken);
+
     public async Task<IpcResponse> SendAsync(
         IpcRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        if (!request.TryValidateMethodPayload(out var requestError))
+        {
+            throw new IpcProtocolException(
+                $"The request contained an invalid method payload: {requestError}");
+        }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(options.ConnectTimeout);
@@ -78,10 +104,10 @@ public sealed class CertBatonPipeClient
                 throw new IpcProtocolException("The service response did not match the request identifier.");
             }
 
-            if (response.Success != (response.Result is not null) ||
-                response.Success == (response.Error is not null))
+            if (!response.TryValidateForMethod(request.Method, out var responseError))
             {
-                throw new IpcProtocolException("The service response contained an inconsistent success result.");
+                throw new IpcProtocolException(
+                    $"The service response was invalid: {responseError}");
             }
 
             return response;

@@ -13,10 +13,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\CertBaton.Application\CertBaton.Application.csproj" />
     <ProjectReference Include="..\..\src\CertBaton.Ctl\CertBaton.Ctl.csproj" />
     <ProjectReference Include="..\..\src\CertBaton.Contracts\CertBaton.Contracts.csproj" />
     <ProjectReference Include="..\..\src\CertBaton.Desktop\CertBaton.Desktop.csproj" />
+    <ProjectReference Include="..\..\src\CertBaton.Domain\CertBaton.Domain.csproj" />
     <ProjectReference Include="..\..\src\CertBaton.Ipc.NamedPipes\CertBaton.Ipc.NamedPipes.csproj" />
+    <ProjectReference Include="..\..\src\CertBaton.Persistence.Sqlite\CertBaton.Persistence.Sqlite.csproj" />
+    <ProjectReference Include="..\..\src\CertBaton.Service\CertBaton.Service.csproj" />
   </ItemGroup>
 
 </Project>

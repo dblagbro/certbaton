@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+readonly state=/fixture-state
+readonly challenge="$state/webroot/.well-known/acme-challenge"
+readonly invalid_config="$state/inject/nginx/99-invalid-fixture.conf"
+readonly reload_plan="$state/inject/reload-plan"
+
+[[ "$(id -u)" -eq 0 ]] || {
+    printf 'fixture injection requires container-root access\n' >&2
+    exit 77
+}
+
+[[ "$#" -eq 1 ]] || {
+    printf 'fixture injection accepts exactly one mode\n' >&2
+    exit 64
+}
+
+reset_injections() {
+    rm -f "$invalid_config" "$reload_plan" "$reload_plan.next"
+    chown fixture:nginx "$challenge"
+    chmod 2770 "$challenge"
+}
+
+mode="${1:-}"
+case "$mode" in
+    reset|none)
+        reset_injections
+        ;;
+    unwritable-challenge)
+        reset_injections
+        chown root:nginx "$challenge"
+        chmod 0550 "$challenge"
+        ;;
+    invalid-config)
+        reset_injections
+        printf 'certbaton_fixture_invalid_directive on;\n' >"$invalid_config"
+        chmod 0600 "$invalid_config"
+        ;;
+    reload-failure)
+        reset_injections
+        printf 'fail\n' >"$reload_plan"
+        ;;
+    stale-endpoint)
+        reset_injections
+        printf 'skip\n' >"$reload_plan"
+        ;;
+    rollback-failure)
+        reset_injections
+        printf 'pass\nfail\n' >"$reload_plan"
+        ;;
+    stale-rollback-failure)
+        reset_injections
+        printf 'skip\nfail\n' >"$reload_plan"
+        ;;
+    *)
+        printf '%s\n' \
+            'usage: fixture-inject {' \
+            '  reset|unwritable-challenge|invalid-config|reload-failure|' \
+            '  stale-endpoint|rollback-failure|stale-rollback-failure' \
+            '}' >&2
+        exit 64
+        ;;
+esac
+
+printf 'fixture injection mode: %s\n' "$mode"

@@ -6,6 +6,7 @@
     <Project Path="src/CertBaton.Desktop/CertBaton.Desktop.csproj" />
     <Project Path="src/CertBaton.Domain/CertBaton.Domain.csproj" />
     <Project Path="src/CertBaton.Ipc.NamedPipes/CertBaton.Ipc.NamedPipes.csproj" />
+    <Project Path="src/CertBaton.Persistence.Sqlite/CertBaton.Persistence.Sqlite.csproj" />
     <Project Path="src/CertBaton.Service/CertBaton.Service.csproj" />
     <Project Path="src/CertBaton.Verification/CertBaton.Verification.csproj" />
   </Folder>

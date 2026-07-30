@@ -1,0 +1,70 @@
+name: certbaton-local-fixture
+
+services:
+  target:
+    image: certbaton-fixture-target:local
+    build:
+      context: ./target
+      dockerfile: Dockerfile
+      pull: true
+    platform: linux/amd64
+    restart: "no"
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - KILL
+      - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
+      - SYS_CHROOT
+    ports:
+      - "127.0.0.1:${CERTBATON_FIXTURE_SSH_PORT:-12222}:22"
+      - "127.0.0.1:${CERTBATON_FIXTURE_HTTP_PORT:-18080}:80"
+      - "127.0.0.1:${CERTBATON_FIXTURE_HTTPS_PORT:-18443}:443"
+    environment:
+      CERTBATON_FIXTURE_HOSTNAME: certbaton-fixture.test
+    volumes:
+      - type: bind
+        source: ./runtime/ssh/fixture_ed25519.pub
+        target: /fixture-input/ssh/fixture_ed25519.pub
+        read_only: true
+      - type: volume
+        source: fixture_state
+        target: /fixture-state
+      - type: bind
+        source: ./runtime/pki
+        target: /fixture-output/pki
+    tmpfs:
+      - /run:size=16m,mode=0755
+      - /tmp:size=32m,mode=1777
+      - /var/lib/nginx/tmp:size=32m,mode=0750
+      - /var/log/nginx:size=8m,mode=0755
+    networks:
+      - fixture
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/fixture-healthcheck
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 10s
+    labels:
+      org.certbaton.fixture: "true"
+      org.certbaton.fixture.disposable: "true"
+
+networks:
+  fixture:
+    internal: true
+
+volumes:
+  fixture_state:
+    labels:
+      org.certbaton.fixture: "true"
+      org.certbaton.fixture.disposable: "true"

@@ -27,14 +27,12 @@ as test data.
 The P0 development target is Windows 11 x64 with the .NET 10 SDK.
 
 ```powershell
-git clone <repository-url>
+git clone https://github.com/dblagbro/certbaton.git
 Set-Location .\certbaton
 dotnet restore .\CertBaton.slnx --locked-mode
 dotnet build .\CertBaton.slnx --configuration Debug --no-restore
 dotnet test .\CertBaton.slnx --configuration Debug --no-build --no-restore
 ```
-
-Replace `<repository-url>` with the public repository URL after it is published.
 
 ## Contribution workflow
 

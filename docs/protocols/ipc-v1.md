@@ -1,6 +1,6 @@
 # CertBaton local IPC protocol v1
 
-Status: **Implemented draft for the P0 health exchange**
+Status: **Health and developer-only durable simulation dispatch implemented**
 
 This document describes the current local protocol between the CertBaton
 Windows Service and the desktop application or diagnostic CLI. It is not a
@@ -13,8 +13,8 @@ remote API or a public compatibility promise.
 - Development server: a console-mode host exercised by the integration tests;
   production Desktop and CLI clients do not trust a console process.
 - Remote and anonymous access: explicitly denied by the pipe DACL.
-- Current operation: a read-only health request available to authenticated
-  local users.
+- Implemented service operations: read-only `health` and `simulation.latest`,
+  plus narrowly authorized synthetic `simulation.start`.
 - Client authentication of the installed service: after connecting, and before
   sending a request, the client obtains the pipe server's process ID. It queries
   Windows Service Control Manager for the running process registered as the
@@ -46,10 +46,13 @@ registration, service SID type, installed DACL, and service process lifecycle
 have not yet been created and qualified by a real installer on a clean machine.
 That evidence remains a release gate.
 
-Before a mutating operation is added, the installer and service must establish
-narrower Operator and Administrator authorization and test filtered UAC
-tokens. Knowing the pipe name, being a local User, or passing endpoint
-authentication is never authorization for a mutating operation.
+The synthetic start operation is authorized only for the current user on the
+development pipe or an elevated local administrator on the installed-service
+profile. This temporary policy does not authorize real certificate or remote
+host changes. Before a production mutation is added, the installer and service
+must establish a narrower Operator role and test filtered UAC tokens. Knowing
+the pipe name, being a local User, or passing endpoint authentication is never
+authorization for a production mutation.
 
 ## Framing
 
@@ -68,7 +71,7 @@ Implemented rules:
   `null` messages, malformed JSON, and truncated frames are rejected;
 - JSON property matching is case-sensitive;
 - one request and one response are exchanged per connection;
-- a client has five seconds to complete the health exchange before its
+- a client has five seconds to complete the exchange before its
   connection slot is released.
 
 The protocol must never carry certificate private keys, SSH credentials,
@@ -82,7 +85,8 @@ passwords, arbitrary logs, or recovery archives.
   "requestId": "31ee6769-0ad0-4c47-95b2-e3d7601d663c",
   "method": "health",
   "sentAtUtc": "2026-07-29T20:00:00Z",
-  "deadlineUtc": "2026-07-29T20:00:03Z"
+  "deadlineUtc": "2026-07-29T20:00:03Z",
+  "payload": null
 }
 ```
 
@@ -90,11 +94,60 @@ passwords, arbitrary logs, or recovery archives.
 | --- | --- |
 | `protocolVersion` | Must equal `1` |
 | `requestId` | Non-empty UUID; correlates this request and response |
-| `method` | Exact, case-sensitive registered method; currently only `health` |
+| `method` | Exact, case-sensitive registered method |
 | `sentAtUtc` | Timestamp within the allowed local clock window |
 | `deadlineUtc` | Later than `sentAtUtc`, in the future, and no more than 30 seconds ahead |
+| `payload` | Typed start payload for `simulation.start`; `null` for `health` and `simulation.latest` |
 
 The request ID is not an authorization token or an idempotency guarantee.
+
+## Simulation requests
+
+`simulation.latest` has no payload:
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "7a963936-129a-4f37-aafb-c7b90bc9e060",
+  "method": "simulation.latest",
+  "sentAtUtc": "2026-07-29T20:00:00Z",
+  "deadlineUtc": "2026-07-29T20:00:03Z",
+  "payload": null
+}
+```
+
+`simulation.start` carries a non-empty idempotency UUID and an optional
+synthetic failure stage:
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "e69c6a10-0b52-46bf-9251-59aa03b1913e",
+  "method": "simulation.start",
+  "sentAtUtc": "2026-07-29T20:00:00Z",
+  "deadlineUtc": "2026-07-29T20:00:03Z",
+  "payload": {
+    "idempotencyKey": "0c09079b-9297-480d-9973-360fac79703a",
+    "failureStage": "challenge"
+  }
+}
+```
+
+`failureStage` is either `null` or exactly one of these case-sensitive,
+lower-case wire values: `preflight`, `order`, `challenge`, `issuance`,
+`deployment`, `activation`, `verification`, or `cleanup`.
+
+The idempotency UUID identifies the requested simulation plan. Retrying the
+same UUID and failure stage returns the same durable job, including while it is
+active. Reusing a UUID with a different plan fails closed. Replaying an older
+terminal request returns that historical job to the caller but does not replace
+the service's global latest-job view.
+
+The contract layer validates message shape; it does not authorize work.
+Authorization for `simulation.start` is service policy, described in ADR 0007,
+and is not implemented by the contract layer. The service enqueues accepted
+simulation work in its single-reader coordinator, persists it before returning,
+and performs it independently of the desktop connection.
 
 ## Successful health response
 
@@ -104,14 +157,69 @@ The request ID is not an authorization token or an idempotency guarantee.
   "requestId": "31ee6769-0ad0-4c47-95b2-e3d7601d663c",
   "success": true,
   "result": {
-    "status": "healthy",
-    "serviceVersion": "0.1.0-dev",
-    "startedAtUtc": "2026-07-29T19:55:00Z",
-    "respondedAtUtc": "2026-07-29T20:00:00Z"
+    "health": {
+      "status": "healthy",
+      "serviceVersion": "0.1.0-dev",
+      "startedAtUtc": "2026-07-29T19:55:00Z",
+      "respondedAtUtc": "2026-07-29T20:00:00Z"
+    },
+    "simulationRun": null
   },
   "error": null
 }
 ```
+
+## Successful simulation response
+
+Both simulation methods return the same typed run snapshot:
+
+```json
+{
+  "protocolVersion": 1,
+  "requestId": "e69c6a10-0b52-46bf-9251-59aa03b1913e",
+  "success": true,
+  "result": {
+    "health": null,
+    "simulationRun": {
+      "runId": "0198fbc8-e3a8-7595-af47-2d0e30a010c5",
+      "status": "failed",
+      "currentStage": null,
+      "terminalStage": "challenge",
+      "outcome": "failed",
+      "requestedAtUtc": "2026-07-29T20:00:00Z",
+      "startedAtUtc": "2026-07-29T20:00:00Z",
+      "completedAtUtc": "2026-07-29T20:00:01Z",
+      "evidence": [
+        {
+          "sequence": 1,
+          "stage": "challenge",
+          "outcome": "failed",
+          "recordedAtUtc": "2026-07-29T20:00:01Z",
+          "code": "simulation.injected_failure",
+          "description": "The configured simulated failure occurred."
+        }
+      ]
+    }
+  },
+  "error": null
+}
+```
+
+A successful result envelope contains exactly one non-null payload:
+`health` or `simulationRun`. Clients reject zero or multiple payloads and
+reject a payload that does not match the requested method.
+
+Simulation `status` is exactly `queued`, `running`, `succeeded`, `failed`,
+`cancelled`, or `interrupted`. Terminal `outcome` uses `succeeded`, `failed`,
+`cancelled`, or `interrupted`. Stage and outcome fields are JSON strings, never
+numeric enum ordinals. All timestamps are UTC. Started/completed and
+current/terminal state are nullable where the lifecycle permits. An interrupted
+run may have no terminal stage when recovery occurs before the first stage.
+
+Evidence is typed, sequential from one, ordered, and limited to 64 records.
+Codes are limited to 128 characters and descriptions to 1,024 characters. A
+`succeeded` snapshot must contain successful evidence for all eight stages in
+pipeline order, including verification and cleanup.
 
 ## Error response
 
@@ -135,6 +243,10 @@ Current error codes include:
 - `deadline_exceeded`
 - `invalid_deadline`
 - `method_not_found`
+- `simulation_not_found`
+- `simulation_start_forbidden`
+- `simulation_already_active`
+- `simulation_idempotency_conflict`
 - `internal_error`
 
 Messages are display-safe and do not include stack traces, credentials, remote
@@ -149,18 +261,46 @@ safely is closed without an error response.
 - Unknown methods fail closed.
 - Removing a field, changing a field's type or meaning, changing framing, or
   relaxing an authorization boundary requires a new protocol version.
-- Any future mutating method requires a payload schema, operation-specific
-  authorization, durable idempotency, a deadline, redacted audit fields, and
-  negative tests before registration.
+- `simulation.start` uses operation-specific authorization, a caller-provided
+  idempotency UUID, bounded enqueueing, durable state, redacted evidence, and
+  negative tests.
 
-Long-running certificate work will not hold a pipe connection open. A future
-short request will create a durable job whose state can be queried separately.
+The simulation start request returns after durable job creation; the service
+continues the run independently and `simulation.latest` queries its state.
+Future certificate work must retain this short enqueue/query shape rather than
+holding a pipe connection open for network or deployment work.
+
+`simulation.latest` is the job with the greatest durable insertion sequence,
+not the greatest wall-clock timestamp. It is a global development view and may
+change when another authorized client starts a later run. A client that polls
+after `simulation.start` must correlate the returned `runId` and must not
+attribute a different run's evidence to its accepted run.
+
+Cancellation before the coordinator claims a queued start command creates no
+job. Once claim wins, job creation completes even if the IPC deadline later
+expires. The caller must treat that result as indeterminate and retry the same
+idempotency UUID; the Desktop preserves it for this purpose.
 
 ## Test coverage
 
 The current automated suite covers:
 
 - health request/response over an ACL-protected pipe;
+- typed simulation start/latest request and response framing;
+- authorized development dispatch and denial of an ordinary installed-service
+  caller before enqueue;
+- service-owned successful and injected-failure simulation persistence;
+- active and terminal same-key retries without duplicate work or latest-view
+  rollback;
+- pre-claim cancellation without a durable job and post-claim durable
+  acceptance;
+- durable latest selection across a backward wall-clock adjustment;
+- rejection of persistence writes from the wrong service execution epoch;
+- desktop reuse of an ambiguous request key and rejection of a mismatched
+  latest-run ID;
+- method/payload shape validation and exact lower-case contract values;
+- rejection of zero-payload and multiple-payload successful envelopes;
+- bounded evidence and terminal lifecycle validation;
 - observation of the actual caller SID and Identification impersonation level;
 - rejection of a mismatched pipe-name squatter before any request byte is sent;
 - frame round-trip;
@@ -191,10 +331,11 @@ Still required before the IPC boundary exits Phase 0:
 - verified redaction of every response and event field.
 
 An IPC handler that ignores cancellation can continue executing in process,
-but its late result is discarded and its client slot is released. Mutating or
-long-running certificate work is therefore prohibited inside an IPC handler;
-future requests will validate and enqueue durable jobs with their own
-cancellation and recovery boundaries.
+but its late result is discarded and its client slot is released. Long-running
+work is therefore prohibited inside an IPC handler. The current synthetic start
+handler performs only validation, authorization, bounded enqueueing, and
+durable job creation; the service-owned coordinator runs the stages with its
+own recovery boundary.
 
 Server-process validation relies on the integrity of the Windows kernel and
 Service Control Manager. It does not claim to resist a local administrator or

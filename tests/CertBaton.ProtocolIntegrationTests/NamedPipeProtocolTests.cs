@@ -39,8 +39,8 @@ public sealed class NamedPipeProtocolTests
 
         Assert.IsTrue(response.Success);
         Assert.IsNotNull(response.Result);
-        Assert.AreEqual("healthy", response.Result.Status);
-        Assert.AreEqual("test", response.Result.ServiceVersion);
+        Assert.AreEqual("healthy", response.Result.Health?.Status);
+        Assert.AreEqual("test", response.Result.Health?.ServiceVersion);
         Assert.AreEqual(
             WindowsIdentity.GetCurrent().User?.Value,
             observedClientSid);
@@ -49,6 +49,91 @@ public sealed class NamedPipeProtocolTests
             observedImpersonationLevel);
 
         await StopServerAsync(serverCancellation, serverTask);
+    }
+
+    [TestMethod]
+    public async Task SimulationStartRoundTripsTypedPayloadAndResult()
+    {
+        var pipeName = $"CertBaton.Tests.{Guid.NewGuid():N}";
+        var idempotencyKey = Guid.NewGuid();
+        SimulationStartPayload? observedPayload = null;
+        using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var server = CreateServer(pipeName);
+        var serverTask = server.RunAsync(
+            (request, identity, cancellationToken) =>
+            {
+                _ = identity;
+                _ = cancellationToken;
+                observedPayload = request.Payload;
+                return ValueTask.FromResult(
+                    IpcResponse.Succeeded(
+                        request.RequestId,
+                        CreateFailedSimulationSnapshot()));
+            },
+            serverCancellation.Token);
+
+        var response = await CreateClient(pipeName).StartSimulationAsync(
+            idempotencyKey,
+            SimulationContractValues.ChallengeStage,
+            serverCancellation.Token);
+
+        Assert.IsTrue(response.Success);
+        Assert.AreEqual(idempotencyKey, observedPayload?.IdempotencyKey);
+        Assert.AreEqual(
+            SimulationContractValues.ChallengeStage,
+            observedPayload?.FailureStage);
+        Assert.AreEqual(
+            SimulationContractValues.FailedStatus,
+            response.Result?.SimulationRun?.Status);
+
+        await StopServerAsync(serverCancellation, serverTask);
+    }
+
+    [TestMethod]
+    public async Task SimulationLatestSendsNoPayload()
+    {
+        var pipeName = $"CertBaton.Tests.{Guid.NewGuid():N}";
+        IpcRequest? observedRequest = null;
+        using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var server = CreateServer(pipeName);
+        var serverTask = server.RunAsync(
+            (request, identity, cancellationToken) =>
+            {
+                _ = identity;
+                _ = cancellationToken;
+                observedRequest = request;
+                return ValueTask.FromResult(
+                    IpcResponse.Succeeded(
+                        request.RequestId,
+                        CreateFailedSimulationSnapshot()));
+            },
+            serverCancellation.Token);
+
+        var response = await CreateClient(pipeName)
+            .GetLatestSimulationAsync(serverCancellation.Token);
+
+        Assert.IsTrue(response.Success);
+        Assert.AreEqual(IpcProtocol.SimulationLatestMethod, observedRequest?.Method);
+        Assert.IsNull(observedRequest?.Payload);
+
+        await StopServerAsync(serverCancellation, serverTask);
+    }
+
+    [TestMethod]
+    public async Task ClientRejectsSuccessfulEnvelopeWithNoPayload()
+    {
+        await AssertClientRejectsEnvelopeAsync(
+            new IpcResultEnvelope(null, null));
+    }
+
+    [TestMethod]
+    public async Task ClientRejectsSuccessfulEnvelopeWithMultiplePayloads()
+    {
+        var now = DateTimeOffset.UtcNow;
+        await AssertClientRejectsEnvelopeAsync(
+            new IpcResultEnvelope(
+                new HealthSnapshot("healthy", "test", now, now),
+                CreateFailedSimulationSnapshot()));
     }
 
     [TestMethod]
@@ -167,7 +252,7 @@ public sealed class NamedPipeProtocolTests
             var response = await CreateClient(pipeName).GetHealthAsync(serverCancellation.Token);
 
             Assert.IsTrue(response.Success);
-            Assert.AreEqual("healthy", response.Result?.Status);
+            Assert.AreEqual("healthy", response.Result?.Health?.Status);
         }
 
         await StopServerAsync(serverCancellation, serverTask);
@@ -264,7 +349,7 @@ public sealed class NamedPipeProtocolTests
                 .GetHealthAsync(serverCancellation.Token);
 
             Assert.IsTrue(secondResponse.Success);
-            Assert.AreEqual("healthy", secondResponse.Result?.Status);
+            Assert.AreEqual("healthy", secondResponse.Result?.Health?.Status);
             Assert.IsFalse(firstHandlerFinished.Task.IsCompleted);
         }
         finally
@@ -339,6 +424,64 @@ public sealed class NamedPipeProtocolTests
                 ConnectTimeout = TimeSpan.FromSeconds(5),
                 DevelopmentServerProcessId = Environment.ProcessId,
             });
+
+    private static SimulationRunSnapshot CreateFailedSimulationSnapshot()
+    {
+        var requestedAtUtc = DateTimeOffset.UtcNow;
+        var completedAtUtc = requestedAtUtc.AddMilliseconds(1);
+        return new SimulationRunSnapshot(
+            Guid.NewGuid(),
+            SimulationContractValues.FailedStatus,
+            null,
+            SimulationContractValues.ChallengeStage,
+            SimulationContractValues.FailedOutcome,
+            requestedAtUtc,
+            requestedAtUtc,
+            completedAtUtc,
+            [
+                new SimulationEvidenceSnapshot(
+                    1,
+                    SimulationContractValues.ChallengeStage,
+                    SimulationContractValues.FailedOutcome,
+                    completedAtUtc,
+                    "simulation.injected_failure",
+                    "The configured simulated failure occurred."),
+            ]);
+    }
+
+    private static async Task AssertClientRejectsEnvelopeAsync(
+        IpcResultEnvelope result)
+    {
+        var pipeName = $"CertBaton.Tests.{Guid.NewGuid():N}";
+        using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var server = CreateServer(pipeName);
+        var serverTask = server.RunAsync(
+            (request, identity, cancellationToken) =>
+            {
+                _ = identity;
+                _ = cancellationToken;
+                return ValueTask.FromResult(
+                    new IpcResponse(
+                        IpcProtocol.CurrentVersion,
+                        request.RequestId,
+                        true,
+                        result,
+                        null));
+            },
+            serverCancellation.Token);
+
+        try
+        {
+            await Assert.ThrowsExactlyAsync<IpcProtocolException>(
+                async () =>
+                    await CreateClient(pipeName)
+                        .GetHealthAsync(serverCancellation.Token));
+        }
+        finally
+        {
+            await StopServerAsync(serverCancellation, serverTask);
+        }
+    }
 
     private static async Task StopServerAsync(
         CancellationTokenSource cancellation,

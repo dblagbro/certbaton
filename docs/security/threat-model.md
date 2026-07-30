@@ -6,12 +6,14 @@ This document describes the security boundaries of the open-source CertBaton
 Windows client. It is an engineering review artifact, not a claim that the
 planned certificate workflow is implemented or safe for production.
 
-CertBaton currently implements only a Windows desktop shell, a service host, a
-diagnostic CLI, and a read-only health exchange over a local named pipe. It does
-not yet persist configuration or secrets, import address books, connect to
-remote hosts, communicate with an ACME service, issue certificates, deploy
-files, activate a web server, verify a public endpoint, install a Windows
-service, or update itself.
+CertBaton currently implements a Windows desktop shell, a service host, a
+diagnostic CLI, read-only health/status exchange, and a narrowly authorized
+synthetic renewal start over a local named pipe. The service persists only
+simulated jobs and non-secret evidence in SQLite. It does not yet persist target
+configuration or secrets, import address books, connect to remote hosts,
+communicate with an ACME service, issue certificates, deploy files, activate a
+web server, verify a public endpoint, install a Windows service, or update
+itself.
 
 ## Status notation
 
@@ -170,15 +172,18 @@ an automatic weakening of a security control.
                    typed activation and rollback
 ```
 
-### Flow 0: local health exchange
+### Flow 0: local health and synthetic simulation exchange
 
 **Implemented.** A local client sends one bounded, versioned JSON request. The
 client first obtains the connected pipe server's process ID and requires it to
 match the running process registered with Windows Service Control Manager for
 the `CertBaton` service. Only then does it send the request. The service obtains
 the caller's Windows SID under the client's Identification-level token,
-validates the request, and returns a bounded health response. No secret or
-mutating method exists.
+validates the request, and returns a bounded response. Read-only health/latest
+requests are available to admitted callers. Synthetic start is limited to the
+current-user development profile or an elevated administrator under the
+installed-service profile. It enqueues no network, credential, certificate, or
+remote-host operation.
 
 The installed-service DACL profile denies network and anonymous SIDs, grants
 client rights to local Users and Administrators, and reserves full-control
@@ -250,9 +255,10 @@ behavior must pass release gates.
 These rules apply even if a connector, import format, or workflow would be
 easier without them:
 
-- **Implemented now:** the only IPC method is read-only health; the current IPC
-  DTOs cannot carry a certificate key, SSH credential, password, or arbitrary
-  log.
+- **Implemented now:** current IPC is limited to read-only health/latest and a
+  synthetic start that cannot perform network, credential, certificate, or
+  remote-host work. Its DTOs cannot carry a certificate key, SSH credential,
+  password, or arbitrary log.
 - **Implemented now:** IPC frames are length-bounded and parsed into explicit
   types with case-sensitive fields; unknown and duplicate properties are
   rejected.
@@ -268,13 +274,13 @@ easier without them:
   to act as the caller.
 - **Planned:** future IPC uses opaque secret references, never reusable secret
   values in general request, response, status, or diagnostic messages.
-- **Planned:** the service owns schedules, locks, secrets, remote operations,
-  and durable run state. Closing the UI cannot transfer or cancel ownership
-  implicitly.
-- **Implemented/planned:** endpoint authentication exists for the health
-  exchange. Every future mutating operation must additionally authorize the
-  caller for that operation, use a deadline, and have a durable idempotency
-  rule.
+- **Implemented/planned:** the service owns durable synthetic run state and
+  continues accepted simulations after the UI closes. It is still planned to
+  own schedules, locks, secrets, and remote operations.
+- **Implemented/planned:** endpoint authentication exists for all current IPC.
+  Synthetic start has its own temporary authorization policy, request deadline,
+  bounded queue, and durable idempotency key. Every future production mutation
+  must define and test its own narrower authorization and idempotency rule.
 - **Planned:** a first-seen SSH host key requires explicit operator review. A
   changed pinned key is a hard stop during unattended work.
 - **Planned:** remote paths remain inside connector-declared roots after
@@ -304,11 +310,11 @@ easier without them:
 | Spoofing | A client puts a privileged username or SID in JSON. | **Implemented:** the client requests an Identification-level token; the server briefly reads the connected Windows token's SID and role membership; JSON identity is not accepted. Anonymous and network SIDs are denied by both pipe security profiles. | Add explicit unauthorized-local and remote-attempt tests. Review behavior under filtered UAC tokens. |
 | Spoofing | A local process creates a look-alike pipe before the genuine service and returns a false response or captures future requests. | **Implemented/partial:** before writing any request bytes, the client obtains the connected pipe server PID and requires an exact match with the running `CertBaton` process reported by Windows Service Control Manager. A negative integration test proves a mismatched pipe squatter is rejected before receiving request data. Tests use a separate internal expected-PID pin, not a production bypass. | Qualify the real registered service, exact service SID, installed DACL, stop/restart behavior, and relevant PID/process races through the installer on a clean machine. |
 | Tampering | A client sends malformed, ambiguous, deeply nested, oversized, truncated, or version-confused JSON. | **Implemented/partial:** fixed-length framing, size and depth limits, strict explicit DTOs, duplicate and unknown property rejection, exact version checks, and sanitized protocol errors exist. | Complete malformed UTF-8, partial read, exact-boundary, missing-field, fuzz, and disconnect tests. |
-| Repudiation | A user denies requesting a certificate or changing a target. | **Not applicable to current health method. Planned:** record caller SID, request identifier, action, target identifier, approval basis, timestamps, and outcome without secrets. | Define audit schema, retention, clock handling, export, and administrator-tampering limitations. |
+| Repudiation | A user denies requesting a certificate or changing a target. | **Partial for synthetic work:** request key, timestamps, stages, and outcome are persisted, but the caller SID is not yet part of durable evidence. **Planned for production:** record caller SID, request identifier, action, target identifier, approval basis, timestamps, and outcome without secrets. | Define audit schema, retention, clock handling, export, and administrator-tampering limitations. |
 | Information disclosure | Health or error responses reveal paths, stack traces, credentials, target inventory, or internal state. | **Implemented/partial:** current health contract contains only status, version, and timestamps; internal exceptions map to a fixed error. | Review version disclosure policy. Add response-field and log-redaction tests before adding target operations. |
 | Denial of service | A local process opens connections, stalls reads/writes, or sends expensive frames until the service cannot schedule renewals. | **Implemented/partial:** bounded frames, a finite client limit, per-client timeout, cancellation, stalled-client coverage, and rejection of late success from a non-cooperative handler exist. A late handler is observed but cannot retain the pipe slot. | Load-test saturation, slow readers/writers, repeated reconnects, shutdown, memory use, and fairness. Mutating work must be a durable job outside the IPC handler so ignored cancellation cannot continue an unsafe detached mutation. Reserve certificate work from IPC starvation. |
-| Elevation of privilege | Any member of the local Users group invokes a future mutating method through the health-only ACL. | **Current safe limitation:** no mutating method exists. **Planned:** installer-created Operator and Administrator roles plus operation-level authorization. The current broad health ACL is not sufficient. | Negative tests for every method and role, including filtered tokens, disabled users, service repair, and ACL drift. |
-| Elevation of privilege | Replay or duplicate submission starts more than one order or activation. | **Planned:** durable idempotency key, per-target lock, one active order, request deadlines, and state-machine checks. A request ID alone is not authorization or idempotency. | Crash/restart and concurrent-trigger tests at every stage. |
+| Elevation of privilege | Any member of the local Users group invokes a mutation through the read-oriented pipe ACL. | **Partial:** synthetic start is allowed only for the current user in development or an elevated administrator under the installed-service profile; an ordinary installed-service caller is denied before enqueue. This temporary rule does not authorize production work. **Planned:** installer-created Operator and Administrator roles plus per-operation authorization. | Negative tests for every method and role, including filtered tokens, disabled users, service repair, and ACL drift. |
+| Elevation of privilege | Replay or duplicate submission starts more than one order or activation. | **Partial for simulation:** caller-provided durable idempotency, one active job, and state-machine checks exist. **Planned for production:** per-target locks, durable order semantics, and retry behavior at every remote boundary. A request ID alone is not authorization or idempotency. | Crash/restart and concurrent-trigger tests at every stage. |
 
 The service must treat a pipe disconnect as loss of the requester, not proof
 that already-started remote work was cancelled or rolled back.
@@ -331,10 +337,10 @@ ordinary users and unrelated processes, and clear recovery behavior.
 
 | Category | Threat | Controls and status | Required evidence or remaining work |
 | --- | --- | --- | --- |
-| Tampering | Database edits alter host pins, schedules, approvals, checkpoints, or success evidence. | **Planned:** service-only write access, transactional migrations, constrained records, monotonic state transitions, and consistency checks. | Mutation tests, downgrade tests, crash injection, backup restore, and detection of impossible state transitions. |
-| Information disclosure | Database, logs, Event Log entries, support bundles, or alerts expose secrets or a detailed customer inventory. | **Current limitation:** no target database or target logging exists. Current service log messages are fixed. **Planned:** classification and redaction at event creation, opaque IDs, allowlisted export fields, and explicit export preview. | Seed canary secrets into every field and prove they do not appear in logs, errors, exports, notifications, crash output, or process arguments. |
+| Tampering | Database edits alter host pins, schedules, approvals, checkpoints, or success evidence. | **Partial for simulation:** a STRICT schema, migration checksum, foreign keys, constrained transitions, ordered append-only evidence, and success invariant exist. Installed service/storage ACLs, authenticated records, production migrations, and target state do not. | Mutation tests, downgrade tests, crash injection, backup restore, clean-machine ACL qualification, and detection of impossible state transitions. |
+| Information disclosure | Database, logs, Event Log entries, support bundles, or alerts expose secrets or a detailed customer inventory. | **Current limitation:** SQLite contains only synthetic identifiers, an optional failure stage, timestamps, fixed codes, and fixed descriptions; no targets or secrets exist. Current service log messages are fixed. **Planned:** classification and redaction at event creation, opaque target IDs, allowlisted export fields, and explicit export preview. | Seed canary secrets into every future field and prove they do not appear in logs, errors, exports, notifications, crash output, or process arguments. |
 | Repudiation | A local administrator changes or deletes local evidence. | **Residual:** local records can support operations but are not tamper-proof against an administrator. **Planned:** structured event IDs and continuity checks make accidental or unprivileged alteration visible. | Document evidence limits; do not market local audit data as non-repudiation. |
-| Denial of service | Corruption, unbounded history, log flooding, disk exhaustion, or concurrent writers stop renewals. | **Planned:** bounded retention, one database writer, disk-space checks, WAL/checkpoint policy, rate-limited events, and degraded-but-visible behavior. | Fault injection for full disk, locked/corrupt database, interrupted migration, and alert storms. |
+| Denial of service | Corruption, unbounded history, log flooding, disk exhaustion, or concurrent writers stop renewals. | **Partial for simulation:** one service worker owns synchronous SQLite I/O, transactions are finite, DELETE journal mode avoids the affected WAL path, and startup marks abandoned running work interrupted. Retention, backup, disk-space checks, and degraded-but-visible behavior are not implemented. | Fault injection for full disk, locked/corrupt database, interrupted migration, retention, backup restore, and alert storms. |
 | Spoofing | A forged alert claims success or asks an operator to disclose a credential. | **Planned:** outbound-only adapter, minimal content, stable event identity, deduplication, recovery events, and clear provenance in the UI. | Choose and threat-model the first unattended channel; test credential prompts are never generated. |
 
 Backups and diagnostics inherit the highest sensitivity of any included field.
@@ -439,7 +445,8 @@ provenance, trustworthiness, or secure update delivery.
 
 ### Evidence present in the pre-alpha source tree
 
-- [x] Only the health method is registered; it is read-only.
+- [x] Only health, synthetic latest, and narrowly authorized synthetic start
+  are registered; none can perform real certificate or remote-host work.
 - [x] Current IPC contracts contain no credential or certificate material.
 - [x] Before sending a request, clients compare the connected pipe server PID
   with the running SCM-registered `CertBaton` service process.
@@ -466,7 +473,7 @@ provenance, trustworthiness, or secure update delivery.
 - [x] No production secret persistence, importer, SSH, ACME, deployment, or
   installer code exists to create a false production-readiness claim.
 
-### Required before adding sensitive or mutating IPC
+### Required before adding sensitive or production-mutating IPC
 
 - [ ] Qualify server-PID validation against a genuinely installed and running
   service, including stop, restart, unavailable-SCM, and process-race cases.
@@ -476,8 +483,9 @@ provenance, trustworthiness, or secure update delivery.
   explicit authorization model.
 - [ ] Authorize every method against the caller token; test standard,
   elevated, filtered, disabled, anonymous, and remote identities.
-- [ ] Add durable job idempotency, request audit, cancellation semantics, and
-  safe reconnect behavior.
+- [x] Add durable idempotency and service-owned recovery for the synthetic job.
+- [ ] Define production request audit, cancellation semantics, per-target
+  locking, and safe reconnect behavior.
 - [ ] Complete IPC fuzzing, malformed UTF-8, partial frame, saturation, shutdown,
   and redaction tests.
 

@@ -46,5 +46,8 @@ jobs:
       - name: Build
         run: dotnet build CertBaton.slnx --configuration Release --no-restore
 
+      - name: Verify formatting
+        run: dotnet format CertBaton.slnx --verify-no-changes --no-restore
+
       - name: Test
         run: dotnet test CertBaton.slnx --configuration Release --no-build --no-restore --logger "trx;LogFileName=test-results.trx"

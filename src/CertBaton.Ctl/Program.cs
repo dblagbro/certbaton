@@ -68,7 +68,8 @@ internal static class Program
 
             var response = await getHealthAsync().ConfigureAwait(false);
 
-            if (!response.Success || response.Result is null)
+            var health = response.Result?.Health;
+            if (!response.Success || health is null)
             {
                 error.WriteLine(
                     $"CertBaton service error: {response.Error?.Code ?? "unknown"} — {response.Error?.Message ?? "No details were returned."}");
@@ -79,15 +80,15 @@ internal static class Program
             {
                 output.WriteLine(
                     JsonSerializer.Serialize(
-                        response.Result,
+                        health,
                         jsonOptions));
             }
             else
             {
-                output.WriteLine($"CertBaton service: {response.Result.Status}");
-                output.WriteLine($"Version: {response.Result.ServiceVersion}");
-                output.WriteLine($"Started: {response.Result.StartedAtUtc:O}");
-                output.WriteLine($"Responded: {response.Result.RespondedAtUtc:O}");
+                output.WriteLine($"CertBaton service: {health.Status}");
+                output.WriteLine($"Version: {health.ServiceVersion}");
+                output.WriteLine($"Started: {health.StartedAtUtc:O}");
+                output.WriteLine($"Responded: {health.RespondedAtUtc:O}");
             }
 
             return 0;
