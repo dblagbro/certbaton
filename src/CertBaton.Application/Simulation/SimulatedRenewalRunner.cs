@@ -7,11 +7,24 @@ public sealed class SimulatedRenewalRunner
     private static readonly Func<RenewalEvidenceRecord, ValueTask> noOpEvidenceObserver =
         static _ => ValueTask.CompletedTask;
     private readonly TimeProvider timeProvider;
+    private readonly TimeSpan stageDelay;
 
-    public SimulatedRenewalRunner(TimeProvider timeProvider)
+    public SimulatedRenewalRunner(
+        TimeProvider timeProvider,
+        TimeSpan stageDelay = default)
     {
         ArgumentNullException.ThrowIfNull(timeProvider);
+        if (stageDelay < TimeSpan.Zero ||
+            stageDelay > TimeSpan.FromMinutes(1))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(stageDelay),
+                stageDelay,
+                "The simulated stage delay must be between zero and one minute.");
+        }
+
         this.timeProvider = timeProvider;
+        this.stageDelay = stageDelay;
     }
 
     public async Task<RenewalRunResult> RunAsync(
@@ -26,6 +39,25 @@ public sealed class SimulatedRenewalRunner
 
         while (run.NextStage is { } stage)
         {
+            if (stageDelay > TimeSpan.Zero &&
+                !cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(
+                            stageDelay,
+                            timeProvider,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (
+                    cancellationToken.IsCancellationRequested)
+                {
+                    // Cancellation is recorded as evidence at the safe stage
+                    // boundary immediately below.
+                }
+            }
+
             if (cancellationToken.IsCancellationRequested ||
                 plan.CancelBeforeStage == stage)
             {

@@ -22,11 +22,11 @@ deployment operation is performed.
 The named-pipe foundation validates the connected server process against the
 SCM registration, identifies callers with an Identification-level Windows
 token, bounds messages, and rejects a pipe-name squatter before sending request
-data. Automated tests use a current-user development profile. There is no
-installer yet, so real SCM registration, service/storage ACLs, the installed
-desktop/CLI path, restart behavior, and clean-machine qualification remain
-release gates. Production desktop and CLI clients deliberately do not trust an
-ordinary console process.
+data. A repeatable developer-only package now installs the real Service,
+desktop, CLI, and protected state directories for local simulation testing.
+It is not a signed release MSI, and clean supported-machine qualification
+remains a release gate. Production desktop and CLI clients deliberately do not
+trust an ordinary console process.
 
 ## Why CertBaton
 
@@ -148,6 +148,9 @@ dotnet test .\CertBaton.slnx --configuration Debug --no-build --no-restore
 
 These commands only build and test the development tree. They do not install a
 Windows Service or authorize production use.
+
+To build, install, audit, exercise, or remove the unsigned standalone package,
+follow the [Windows developer preview guide](docs/installation/developer-preview.md).
 
 ### Test fixtures
 

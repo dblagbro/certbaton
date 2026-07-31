@@ -17,6 +17,7 @@
           "CertBaton.Contracts": "[0.1.0-dev, )"
         }
       }
-    }
+    },
+    "net10.0-windows7.0/win-x64": {}
   }
 }

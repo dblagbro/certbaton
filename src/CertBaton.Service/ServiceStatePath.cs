@@ -25,17 +25,19 @@ public static class ServiceStatePath
                 throw new InvalidOperationException(
                     "The protected CertBaton state directory is missing. Repair the installation before starting the service.");
             }
+
+            InstalledStateSecurityValidator.Validate(stateDirectory);
         }
         else
         {
             _ = Directory.CreateDirectory(stateDirectory);
-        }
 
-        var attributes = File.GetAttributes(stateDirectory);
-        if ((attributes & FileAttributes.ReparsePoint) != 0)
-        {
-            throw new InvalidOperationException(
-                "The CertBaton state directory cannot be a reparse point.");
+            var attributes = File.GetAttributes(stateDirectory);
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException(
+                    "The CertBaton state directory cannot be a reparse point.");
+            }
         }
 
         return Path.Combine(stateDirectory, "certbaton.db");

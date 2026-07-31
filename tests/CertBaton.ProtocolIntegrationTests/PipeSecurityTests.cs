@@ -49,5 +49,25 @@ public sealed class PipeSecurityTests
                 rule =>
                     Equals(rule.IdentityReference, localServiceSid) &&
                     rule.AccessControlType == AccessControlType.Allow));
+
+        var usersSid = new SecurityIdentifier(
+            WellKnownSidType.BuiltinUsersSid,
+            null);
+        var clientRule = rules.Single(
+            rule =>
+                Equals(rule.IdentityReference, usersSid) &&
+                rule.AccessControlType == AccessControlType.Allow);
+        Assert.IsTrue(
+            clientRule.PipeAccessRights.HasFlag(
+                PipeAccessRights.ReadPermissions));
+        Assert.IsFalse(
+            clientRule.PipeAccessRights.HasFlag(
+                PipeAccessRights.ChangePermissions));
+        Assert.IsFalse(
+            clientRule.PipeAccessRights.HasFlag(
+                PipeAccessRights.TakeOwnership));
+        Assert.IsFalse(
+            clientRule.PipeAccessRights.HasFlag(
+                PipeAccessRights.CreateNewInstance));
     }
 }

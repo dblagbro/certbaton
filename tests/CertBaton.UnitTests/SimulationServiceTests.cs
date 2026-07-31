@@ -312,6 +312,7 @@ public sealed class SimulationServiceTests
     }
 
     [TestMethod]
+    [DoNotParallelize]
     public async Task CoordinatorClaimBeforeCancellationFinishesDurableCreation()
     {
         var directory = CreateTestDirectory();
