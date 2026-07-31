@@ -14,6 +14,9 @@ builder.Services.AddWindowsService(options =>
 });
 
 builder.Services.AddSingleton(TimeProvider.System);
+var simulationStageDelay = isInstalledWindowsService
+    ? TimeSpan.FromMilliseconds(750)
+    : TimeSpan.Zero;
 var ipcOptions = new IpcServerOptions
 {
     PipeName = IpcProtocol.DefaultPipeName,
@@ -24,7 +27,11 @@ var ipcOptions = new IpcServerOptions
 builder.Services.AddSingleton(ipcOptions);
 builder.Services.AddSingleton<CertBatonPipeServer>();
 builder.Services.AddSingleton<SimulationAccessPolicy>();
-builder.Services.AddSingleton<SimulatedRenewalRunner>();
+builder.Services.AddSingleton(
+    services =>
+        new SimulatedRenewalRunner(
+            services.GetRequiredService<TimeProvider>(),
+            simulationStageDelay));
 builder.Services.AddSingleton<ISimulationJobStore>(
     _ =>
         new SqliteSimulationJobStore(

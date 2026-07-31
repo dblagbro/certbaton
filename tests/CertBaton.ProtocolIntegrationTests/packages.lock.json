@@ -152,7 +152,7 @@
       "certbaton.ipc.namedpipes": {
         "type": "Project",
         "dependencies": {
-          "CertBaton.Contracts": "[1.0.0, )"
+          "CertBaton.Contracts": "[0.1.0-dev, )"
         }
       }
     }

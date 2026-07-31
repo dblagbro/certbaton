@@ -15,6 +15,25 @@ public sealed class SimulationRenewalTests
             static stage => new object[] { stage });
 
     [TestMethod]
+    public void StageDelayMustRemainWithinTheDeveloperSimulationBound()
+    {
+        _ = new SimulatedRenewalRunner(
+            TimeProvider.System,
+            TimeSpan.FromMinutes(1));
+
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
+            () =>
+                new SimulatedRenewalRunner(
+                    TimeProvider.System,
+                    TimeSpan.FromTicks(-1)));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
+            () =>
+                new SimulatedRenewalRunner(
+                    TimeProvider.System,
+                    TimeSpan.FromMinutes(1).Add(TimeSpan.FromTicks(1))));
+    }
+
+    [TestMethod]
     public async Task SuccessfulRunRecordsEveryStageInOrder()
     {
         var runner = new SimulatedRenewalRunner(
@@ -218,11 +237,66 @@ public sealed class SimulationRenewalTests
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         var runner = new SimulatedRenewalRunner(
-            new IncrementingTimeProvider(simulationStart));
+            new IncrementingTimeProvider(simulationStart),
+            TimeSpan.FromMinutes(1));
 
         var result = await runner.RunAsync(
             Guid.Parse("41aca225-ce76-493b-ac23-38e4546996e1"),
             cancellationToken: cancellation.Token);
+
+        Assert.AreEqual(RenewalTerminalOutcome.Cancelled, result.Outcome);
+        Assert.AreEqual(RenewalStage.Preflight, result.TerminalStage);
+        Assert.HasCount(1, result.Evidence);
+        Assert.AreEqual(
+            RenewalStageOutcome.Cancelled,
+            result.Evidence[0].Outcome);
+    }
+
+    [TestMethod]
+    public async Task StageDelayUsesInjectedTimeProvider()
+    {
+        var timeProvider = new ManualDelayTimeProvider(simulationStart);
+        var stageDelay = TimeSpan.FromSeconds(30);
+        var runner = new SimulatedRenewalRunner(
+            timeProvider,
+            stageDelay);
+
+        var runTask = runner.RunAsync(
+            Guid.Parse("019c0ad8-e632-73e8-b7b5-ebc9bbfb52c8"));
+
+        foreach (var _ in RenewalPipeline.Stages)
+        {
+            var timer = await timeProvider.GetNextTimerAsync();
+            Assert.AreEqual(stageDelay, timer.DueTime);
+            Assert.AreEqual(Timeout.InfiniteTimeSpan, timer.Period);
+            Assert.IsFalse(runTask.IsCompleted);
+            timer.Fire();
+        }
+
+        var result = await runTask;
+
+        Assert.AreEqual(RenewalTerminalOutcome.Succeeded, result.Outcome);
+        Assert.AreEqual(
+            RenewalPipeline.Stages.Count,
+            timeProvider.TimerCount);
+    }
+
+    [TestMethod]
+    public async Task CancellationInterruptsInjectedStageDelayAtSafeBoundary()
+    {
+        var timeProvider = new ManualDelayTimeProvider(simulationStart);
+        using var cancellation = new CancellationTokenSource();
+        var runner = new SimulatedRenewalRunner(
+            timeProvider,
+            TimeSpan.FromSeconds(30));
+
+        var runTask = runner.RunAsync(
+            Guid.Parse("019c0ad8-e632-7fb5-bdf1-ec7062181f43"),
+            cancellationToken: cancellation.Token);
+        _ = await timeProvider.GetNextTimerAsync();
+        cancellation.Cancel();
+
+        var result = await runTask;
 
         Assert.AreEqual(RenewalTerminalOutcome.Cancelled, result.Outcome);
         Assert.AreEqual(RenewalStage.Preflight, result.TerminalStage);
@@ -281,7 +355,7 @@ public sealed class SimulationRenewalTests
         Assert.ThrowsExactly<NotSupportedException>(evidence.Clear);
     }
 
-    private sealed class IncrementingTimeProvider : TimeProvider
+    private class IncrementingTimeProvider : TimeProvider
     {
         private DateTimeOffset nextTimestamp;
 
@@ -295,6 +369,101 @@ public sealed class SimulationRenewalTests
             var current = nextTimestamp;
             nextTimestamp = nextTimestamp.AddMinutes(1);
             return current;
+        }
+    }
+
+    private sealed class ManualDelayTimeProvider : IncrementingTimeProvider
+    {
+        private readonly global::System.Threading.Channels.Channel<ManualTimer> timers =
+            global::System.Threading.Channels.Channel.CreateUnbounded<ManualTimer>();
+        private int timerCount;
+
+        public ManualDelayTimeProvider(DateTimeOffset start)
+            : base(start)
+        {
+        }
+
+        public int TimerCount => Volatile.Read(ref timerCount);
+
+        public override ITimer CreateTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period)
+        {
+            var timer = new ManualTimer(
+                callback,
+                state,
+                dueTime,
+                period);
+            Interlocked.Increment(ref timerCount);
+            if (!timers.Writer.TryWrite(timer))
+            {
+                throw new InvalidOperationException(
+                    "The manual timer queue was unexpectedly closed.");
+            }
+
+            return timer;
+        }
+
+        public async Task<ManualTimer> GetNextTimerAsync() =>
+            await timers.Reader.ReadAsync().AsTask().WaitAsync(
+                TimeSpan.FromSeconds(5));
+    }
+
+    private sealed class ManualTimer : ITimer
+    {
+        private readonly TimerCallback callback;
+        private readonly object? state;
+        private int fired;
+        private int disposed;
+
+        public ManualTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period)
+        {
+            this.callback = callback;
+            this.state = state;
+            DueTime = dueTime;
+            Period = period;
+        }
+
+        public TimeSpan DueTime { get; private set; }
+
+        public TimeSpan Period { get; private set; }
+
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            if (Volatile.Read(ref disposed) != 0)
+            {
+                return false;
+            }
+
+            DueTime = dueTime;
+            Period = period;
+            return true;
+        }
+
+        public void Fire()
+        {
+            if (Interlocked.Exchange(ref fired, 1) == 0 &&
+                Volatile.Read(ref disposed) == 0)
+            {
+                callback(state);
+            }
+        }
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref disposed, 1);
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Dispose();
+            return ValueTask.CompletedTask;
         }
     }
 }

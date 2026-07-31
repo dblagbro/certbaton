@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,5 +16,12 @@
     <ProjectReference Include="..\CertBaton.Domain\CertBaton.Domain.csproj" />
     <ProjectReference Include="..\CertBaton.Ipc.NamedPipes\CertBaton.Ipc.NamedPipes.csproj" />
     <ProjectReference Include="..\CertBaton.Persistence.Sqlite\CertBaton.Persistence.Sqlite.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="appsettings*.json"
+             CopyToPublishDirectory="Never" />
+    <Content Update="appsettings.json"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

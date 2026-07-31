@@ -5,7 +5,7 @@
       "certbaton.application": {
         "type": "Project",
         "dependencies": {
-          "CertBaton.Domain": "[1.0.0, )"
+          "CertBaton.Domain": "[0.1.0-dev, )"
         }
       },
       "certbaton.domain": {

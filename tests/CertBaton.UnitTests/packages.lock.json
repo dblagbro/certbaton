@@ -431,13 +431,6 @@
       "certbaton.contracts": {
         "type": "Project"
       },
-      "certbaton.ctl": {
-        "type": "Project",
-        "dependencies": {
-          "CertBaton.Contracts": "[0.1.0-dev, )",
-          "CertBaton.Ipc.NamedPipes": "[0.1.0-dev, )"
-        }
-      },
       "certbaton.desktop": {
         "type": "Project",
         "dependencies": {
@@ -475,6 +468,13 @@
           "CertBaton.Persistence.Sqlite": "[0.1.0-dev, )",
           "Microsoft.Extensions.Hosting": "[10.0.10, )",
           "Microsoft.Extensions.Hosting.WindowsServices": "[10.0.10, )"
+        }
+      },
+      "certbatonctl": {
+        "type": "Project",
+        "dependencies": {
+          "CertBaton.Contracts": "[0.1.0-dev, )",
+          "CertBaton.Ipc.NamedPipes": "[0.1.0-dev, )"
         }
       },
       "CommunityToolkit.Mvvm": {
