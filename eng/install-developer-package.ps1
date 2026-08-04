@@ -1115,12 +1115,6 @@ try {
         Set-Content -LiteralPath (
             Join-Path $stagingRoot 'install-metadata.json') -Encoding UTF8
 
-    Set-ProtectedDirectoryAcl -Path $stagingRoot `
-        -ServiceRights (
-            [Security.AccessControl.FileSystemRights]::ReadAndExecute) `
-        -GrantUsersReadExecute
-    Reset-DescendantAcls -Path $stagingRoot
-
     $stagedServiceExecutable = Join-Path $stagingRoot `
         'Service\CertBaton.Service.exe'
     $databasePath = Join-Path $DataRoot 'State\certbaton.db'
@@ -1183,6 +1177,11 @@ try {
 
     Move-Item -LiteralPath $stagingRoot -Destination $InstallRoot
     $replacementCommitted = $true
+    Set-ProtectedDirectoryAcl -Path $InstallRoot `
+        -ServiceRights (
+            [Security.AccessControl.FileSystemRights]::ReadAndExecute) `
+        -GrantUsersReadExecute
+    Reset-DescendantAcls -Path $InstallRoot
 
     $serviceExecutable = Join-Path $InstallRoot `
         'Service\CertBaton.Service.exe'
