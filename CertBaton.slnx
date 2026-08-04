@@ -1,16 +1,23 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/CertBaton.Acme.Anvil/CertBaton.Acme.Anvil.csproj" />
     <Project Path="src/CertBaton.Application/CertBaton.Application.csproj" />
     <Project Path="src/CertBaton.Contracts/CertBaton.Contracts.csproj" />
     <Project Path="src/CertBaton.Ctl/CertBaton.Ctl.csproj" />
     <Project Path="src/CertBaton.Desktop/CertBaton.Desktop.csproj" />
     <Project Path="src/CertBaton.Domain/CertBaton.Domain.csproj" />
     <Project Path="src/CertBaton.Ipc.NamedPipes/CertBaton.Ipc.NamedPipes.csproj" />
+    <Project Path="src/CertBaton.Persistence.Sqlite/CertBaton.Persistence.Sqlite.csproj" />
+    <Project Path="src/CertBaton.Remote.Ssh/CertBaton.Remote.Ssh.csproj" />
     <Project Path="src/CertBaton.Service/CertBaton.Service.csproj" />
+    <Project Path="src/CertBaton.Security.Windows/CertBaton.Security.Windows.csproj" />
     <Project Path="src/CertBaton.Verification/CertBaton.Verification.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/CertBaton.Acme.Tests/CertBaton.Acme.Tests.csproj" />
+    <Project Path="tests/CertBaton.Live.Tests/CertBaton.Live.Tests.csproj" />
     <Project Path="tests/CertBaton.ProtocolIntegrationTests/CertBaton.ProtocolIntegrationTests.csproj" />
+    <Project Path="tests/CertBaton.Remote.Ssh.Tests/CertBaton.Remote.Ssh.Tests.csproj" />
     <Project Path="tests/CertBaton.UnitTests/CertBaton.UnitTests.csproj" />
   </Folder>
 </Solution>

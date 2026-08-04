@@ -16,6 +16,7 @@ internal static class PipeSecurityFactory
         PipeAccessRights.WriteAttributes |
         PipeAccessRights.ReadExtendedAttributes |
         PipeAccessRights.WriteExtendedAttributes |
+        PipeAccessRights.ReadPermissions |
         PipeAccessRights.Synchronize;
 
     public static PipeSecurity CreateHealthOnlySecurity(

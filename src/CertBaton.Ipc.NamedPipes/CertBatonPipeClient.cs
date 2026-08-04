@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using CertBaton.Contracts;
 
@@ -44,14 +45,145 @@ public sealed class CertBatonPipeClient
             IpcRequest.CreateHealth(timeProvider, options.ConnectTimeout),
             cancellationToken);
 
-    public async Task<IpcResponse> SendAsync(
-        IpcRequest request,
+    public Task<IpcResponse> GetLatestSimulationAsync(
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateSimulationLatest(
+                timeProvider,
+                options.ConnectTimeout),
+            cancellationToken);
+
+    public Task<IpcResponse> StartSimulationAsync(
+        Guid idempotencyKey,
+        string? failureStage = null,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateSimulationStart(
+                timeProvider,
+                idempotencyKey,
+                failureStage,
+                options.ConnectTimeout),
+            cancellationToken);
+
+    public Task<IpcResponse> ProbeVaultAsync(
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateVaultProbe(
+                timeProvider,
+                options.ConnectTimeout),
+            cancellationToken);
+
+    public async Task<IpcResponse> ImportSshPrivateKeyAsync(
+        ReadOnlyMemory<byte> privateKey,
         CancellationToken cancellationToken = default)
+    {
+        var request = IpcRequest.CreateCredentialImportSshPrivateKey(
+            timeProvider,
+            privateKey.Span,
+            options.ConnectTimeout);
+        try
+        {
+            return await SendAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            if (request.CredentialPayload?.Secret is { } secret)
+            {
+                CryptographicOperations.ZeroMemory(secret);
+            }
+        }
+    }
+
+    public Task<IpcResponse> EnrollTargetAsync(
+        TargetEnrollmentPayload payload,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateTargetEnrollment(
+                timeProvider,
+                payload,
+                options.ConnectTimeout),
+            cancellationToken);
+
+    public async Task<IpcResponse> ProbeSshConnectionAsync(
+        string host,
+        int port,
+        string username,
+        ReadOnlyMemory<byte> privateKey,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new SshConnectionProbePayload(
+            host,
+            port,
+            username,
+            privateKey.ToArray());
+        var request = IpcRequest.CreateSshConnectionProbe(
+            timeProvider,
+            payload,
+            IpcProtocol.MaximumRequestHorizon);
+        try
+        {
+            return await SendCoreAsync(
+                    request,
+                    IpcProtocol.MaximumRequestHorizon,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload.PrivateKey);
+        }
+    }
+
+    public Task<IpcResponse> ListTargetsAsync(
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateTargetList(
+                timeProvider,
+                options.ConnectTimeout),
+            cancellationToken);
+
+    public Task<IpcResponse> StartRenewalAsync(
+        Guid targetId,
+        Guid idempotencyKey,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateRenewalStart(
+                timeProvider,
+                new RenewalStartPayload(targetId, idempotencyKey),
+                options.ConnectTimeout),
+            cancellationToken);
+
+    public Task<IpcResponse> GetRenewalAsync(
+        Guid operationId,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateRenewalGet(
+                timeProvider,
+                new RenewalQueryPayload(operationId),
+                options.ConnectTimeout),
+            cancellationToken);
+
+    public Task<IpcResponse> SendAsync(
+        IpcRequest request,
+        CancellationToken cancellationToken = default) =>
+        SendCoreAsync(request, null, cancellationToken);
+
+    private async Task<IpcResponse> SendCoreAsync(
+        IpcRequest request,
+        TimeSpan? operationTimeout,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        if (!request.TryValidateMethodPayload(out var requestError))
+        {
+            throw new IpcProtocolException(
+                $"The request contained an invalid method payload: {requestError}");
+        }
+
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(options.ConnectTimeout);
+        timeout.CancelAfter(operationTimeout ?? options.ConnectTimeout);
 
         using var pipe = new NamedPipeClientStream(
             ".",
@@ -78,10 +210,10 @@ public sealed class CertBatonPipeClient
                 throw new IpcProtocolException("The service response did not match the request identifier.");
             }
 
-            if (response.Success != (response.Result is not null) ||
-                response.Success == (response.Error is not null))
+            if (!response.TryValidateForMethod(request.Method, out var responseError))
             {
-                throw new IpcProtocolException("The service response contained an inconsistent success result.");
+                throw new IpcProtocolException(
+                    $"The service response was invalid: {responseError}");
             }
 
             return response;
@@ -91,7 +223,7 @@ public sealed class CertBatonPipeClient
             !cancellationToken.IsCancellationRequested)
         {
             throw new TimeoutException(
-                $"The CertBaton service did not respond within {options.ConnectTimeout.TotalSeconds:0.#} seconds.");
+                $"The CertBaton service did not respond within {(operationTimeout ?? options.ConnectTimeout).TotalSeconds:0.#} seconds.");
         }
     }
 }

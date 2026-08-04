@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CertBaton.Contracts;
@@ -34,18 +35,25 @@ public sealed class IpcFrameCodec
         ArgumentNullException.ThrowIfNull(value);
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(value, SerializerOptions);
-        if (payload.Length > maximumFrameBytes)
+        try
         {
-            throw new IpcProtocolException(
-                $"The encoded IPC frame is {payload.Length} bytes; the limit is {maximumFrameBytes} bytes.");
+            if (payload.Length > maximumFrameBytes)
+            {
+                throw new IpcProtocolException(
+                    $"The encoded IPC frame is {payload.Length} bytes; the limit is {maximumFrameBytes} bytes.");
+            }
+
+            var header = new byte[sizeof(int)];
+            BinaryPrimitives.WriteInt32LittleEndian(header, payload.Length);
+
+            await stream.WriteAsync(header, cancellationToken).ConfigureAwait(false);
+            await stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
+            await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
-
-        var header = new byte[sizeof(int)];
-        BinaryPrimitives.WriteInt32LittleEndian(header, payload.Length);
-
-        await stream.WriteAsync(header, cancellationToken).ConfigureAwait(false);
-        await stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
+        }
     }
 
     public async ValueTask<T> ReadAsync<T>(
@@ -85,6 +93,10 @@ public sealed class IpcFrameCodec
         catch (JsonException exception)
         {
             throw new IpcProtocolException("The IPC frame did not contain a valid protocol message.", exception);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
         }
     }
 

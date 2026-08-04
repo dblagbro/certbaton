@@ -6,22 +6,37 @@ CertBaton is an open-source Windows application for small web developers and
 managed service providers who maintain TLS certificates on websites they can
 reach through SSH or SFTP.
 
-The project is in **pre-alpha development**. It cannot yet issue, deploy, renew,
-or recover a production certificate. There are no supported releases, and the
-current code must not be used on a production website.
+The project is in **pre-alpha development**. There are no supported releases,
+and the current code must not be used on a production website.
 
-What works today is deliberately small: the solution builds on .NET 10, the
-service host can start in console development mode, and integration tests can
-complete a bounded, versioned health exchange over an ACL-protected named pipe.
-Clients validate the connected server PID against the process registered for
-the `CertBaton` Windows service before sending a request; the server reads the
-caller's SID using an Identification-level token. Automated tests use a
-current-user development profile and a test-only expected-PID pin, and cover a
-pipe-name squatter being rejected before it receives request data. There is no
-installer yet, so the real SCM registration, exact service-SID DACL, and
-desktop/CLI installed-service path remain unqualified release gates. The
-desktop and CLI deliberately do not trust an ordinary console process.
-Certificate operations and credential persistence do not exist yet.
+The source tree now contains the first real, service-owned HTTP-01 vertical
+slice. An administrator can import an SSH private key into protected storage,
+strictly enroll a target, list targets, and start or inspect a renewal through
+typed CLI/IPC contracts. The Service can coordinate an embedded ACME client,
+exact-pinned SSH/SFTP, a fixed Nginx activation helper, public HTTP
+pre-validation, public TLS verification, durable operation evidence, and a
+basic automatic schedule. The WPF application's main view shows live targets
+and renewal evidence; the synthetic simulator remains available as a secondary
+developer tool.
+
+That is implementation progress, not a support claim. On 2026-08-04, the
+installed Windows Service completed the first manually authorized end-to-end
+qualification run against Let's Encrypt staging and an isolated remote
+Linux/Nginx Docker target. The run proved public HTTP-01 validation, issuance,
+deployment, activation, independent public TLS verification, challenge
+cleanup, durable evidence after a Service restart, and restoration of the
+target's trusted baseline. It was one staging run on one developer fixture;
+production issuance and deployment, failure-injection coverage on a real
+target, WinSCP import, additional hosting connectors, outbound alerts, a signed MSI, and
+a supported release all remain unavailable.
+
+The named-pipe foundation validates the connected server process against the
+SCM registration, identifies callers with an Identification-level Windows
+token, bounds messages, and rejects a pipe-name squatter before sending request
+data. A repeatable developer-only package installs the Service, desktop, CLI,
+and protected state directories. It must be rebuilt, installed or repaired,
+and audited for the exact source revision being tested. It is not a signed
+release MSI, and clean supported-machine qualification remains a release gate.
 
 ## Why CertBaton
 
@@ -42,8 +57,9 @@ provides setup, review, status, and recovery guidance.
 
 ## Intended P0 scope
 
-P0 is the first testable Windows-client milestone. The items below describe the
-target, not functionality that exists today.
+P0 is the first testable Windows-client milestone. Some foundations below now
+exist in pre-alpha form, but every support claim still depends on the evidence
+in the [support matrix](docs/supported-matrix.md).
 
 - Windows 11 x64 desktop application and background service.
 - Opt-in import of non-secret connection metadata from supported local address
@@ -93,9 +109,22 @@ The ordered implementation work and release evidence are in the
 The client foundation uses .NET 10, WPF, and a Windows Service host.
 UI-to-service communication uses a bounded, versioned named-pipe protocol with
 Windows-token caller identification and SCM-backed server-process validation.
-Durable certificate state is planned locally, and secret storage is gated on
-the Windows identity and DPAPI-NG spike described in
+SQLite now holds target configuration, opaque secret references, schedules,
+operations, write-ahead intents, certificate metadata, and sanitized evidence.
+Secret values are kept outside SQLite in Service-owned files protected with
+DPAPI-NG `LOCAL=user` under the dedicated virtual Service account. This choice
+is accepted only for the current pre-alpha implementation; the installed
+logoff, reboot, repair, upgrade, backup, restore, and uninstall lifecycle is
+still a production gate under
 [ADR 0003](docs/architecture/adr/0003-secret-protection-spike.md).
+
+The embedded ACME candidate is Anvil behind a CertBaton-owned boundary. The
+remote adapter uses SSH.NET with an exact algorithm, SHA-256 fingerprint, and
+raw-host-key pin. Privileged Nginx changes go through a separately installed,
+root-owned helper with fixed verbs and transaction identifiers; CertBaton does
+not send arbitrary user commands. See
+[ADR 0005](docs/architecture/adr/0005-embedded-acme-engine-gate.md) and
+[ADR 0009](docs/architecture/adr/0009-sshnet-and-fixed-nginx-helper.md).
 
 Key decisions are recorded in
 [architecture decision records](docs/architecture/adr/).
@@ -118,8 +147,9 @@ The design follows these principles:
 - verify the final certificate independently from the deployment channel; and
 - fail visibly when renewal, activation, or verification cannot be proved.
 
-The production secret-protection design is not yet accepted. Until its security
-spike passes, CertBaton must not persist real credentials. Read
+The pre-alpha vault is not a claim that secrets are safe from a local
+administrator or that recovery is complete. Do not put an actual private key,
+target inventory, host-key pin, or site path in this public repository. Read
 [SECURITY.md](SECURITY.md) before reporting a vulnerability or sharing
 diagnostics.
 
@@ -143,10 +173,32 @@ dotnet test .\CertBaton.slnx --configuration Debug --no-build --no-restore
 These commands only build and test the development tree. They do not install a
 Windows Service or authorize production use.
 
+To build, install, audit, exercise, or remove the unsigned standalone package,
+follow the [Windows developer preview guide](docs/installation/developer-preview.md).
+
+### Pre-alpha live exercise
+
+The Windows desktop now provides the primary guided **Add website** workflow.
+It collects plain-language website and hosting details, browses for an SSH key,
+tests SSH/SFTP without changing the server, displays the observed server
+identity for confirmation, protects the key, and adds the site to the
+multi-site inventory. Advanced Nginx paths remain available for reviewed test
+profiles. The diagnostic CLI exercises the same contracts but is not required
+for enrollment or renewal.
+
+Installed live operations currently require elevation. Automatic scheduling
+exists, but retry policy is preliminary and no toast, email, webhook, or other
+unattended alert channel exists. Keep automatic renewal disabled until a
+disposable target has passed a reviewed manual staging exercise.
+
 ### Test fixtures
 
-Automated local fixtures and the Let's Encrypt staging environment are the
-default test targets. Any test involving a publicly reachable website requires:
+The [disposable local target](docs/fixtures/local-target.md), the isolated
+[Nginx helper fixture](fixtures/remote-nginx-helper/README.md), and the Let's
+Encrypt staging environment are the intended integration sequence. Local fake
+workflow and helper tests, plus the single recorded public staging run, do not
+replace repeatable qualification. Any test involving a publicly reachable
+website requires:
 
 - explicit owner authorization;
 - a declared maintenance window;

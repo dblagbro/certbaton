@@ -1,0 +1,13 @@
+# Root-owned mode 0644 or stricter. Values cannot contain whitespace.
+# Managed roots, the bootstrap directory, and every parent directory must be
+# real (not symlinked), root-owned, and not writable by group or other.
+# The SSH user must be an existing non-root account.
+ssh_user=certbaton
+incoming_root=/var/lib/certbaton/incoming
+release_root=/var/lib/certbaton/releases/example.org
+bootstrap_target=/etc/letsencrypt/live/example.org
+# Use a lower-case, multi-label DNS name. Wildcards are intentionally rejected.
+server_name=example.org
+# nginx_mode is host or docker. Host mode requires nginx_container=-.
+nginx_mode=host
+nginx_container=-

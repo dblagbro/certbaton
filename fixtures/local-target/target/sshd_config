@@ -1,0 +1,32 @@
+Port 22
+ListenAddress 0.0.0.0
+
+HostKey /srv/certbaton/ssh/ssh_host_ed25519_key
+PidFile /run/sshd.pid
+AuthorizedKeysFile /srv/certbaton/ssh/authorized_keys
+
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+PermitEmptyPasswords no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+UsePAM no
+StrictModes yes
+
+AllowUsers fixture
+DisableForwarding yes
+PermitTunnel no
+PermitUserEnvironment no
+PermitUserRC no
+PermitTTY no
+
+MaxAuthTries 3
+MaxSessions 4
+MaxStartups 4:30:8
+LoginGraceTime 20
+LogLevel VERBOSE
+PrintLastLog no
+PrintMotd no
+
+Subsystem sftp internal-sftp -u 0027

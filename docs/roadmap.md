@@ -27,6 +27,21 @@ Exit criteria:
 - the accepted secret design supersedes the proposed spike ADR; and
 - no real credential is required to build or test the repository.
 
+Current implementation snapshot:
+
+- The health exchange and developer-only simulated renewal use typed, bounded
+  v1 messages over the named pipe.
+- The service serializes simulation work, persists job/evidence state in
+  SQLite, and marks a run interrupted on recovery instead of inferring success.
+- The WPF shell can start a success or single-stage-failure simulation and show
+  its durable evidence timeline.
+- The disposable SSH/SFTP and Nginx fixture passes its isolated helper suite.
+- One installed developer build completed a manually authorized public staging
+  order, exact-pinned remote deployment, independent TLS verification, cleanup,
+  durable Service restart check, and trusted-baseline restoration.
+- Clean-machine installer qualification, real-target failure injection,
+  alerting, and production support remain gated.
+
 ## Phase 1: first safe certificate handoff
 
 Goal: complete one narrowly qualified end-to-end renewal in an isolated fixture.
