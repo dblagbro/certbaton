@@ -31,6 +31,7 @@ public sealed partial class SimulationCoordinator : BackgroundService, ISimulati
     private readonly SimulatedRenewalRunner runner;
     private readonly TimeProvider timeProvider;
     private readonly ILogger<SimulationCoordinator> logger;
+    private readonly LiveMaintenanceGate maintenanceGate;
     private readonly Channel<StartSimulationCommand> commands =
         Channel.CreateBounded<StartSimulationCommand>(
             new BoundedChannelOptions(CommandCapacity)
@@ -47,12 +48,14 @@ public sealed partial class SimulationCoordinator : BackgroundService, ISimulati
         ISimulationJobStore store,
         SimulatedRenewalRunner runner,
         TimeProvider timeProvider,
-        ILogger<SimulationCoordinator> logger)
+        ILogger<SimulationCoordinator> logger,
+        LiveMaintenanceGate? maintenanceGate = null)
     {
         this.store = store;
         this.runner = runner;
         this.timeProvider = timeProvider;
         this.logger = logger;
+        this.maintenanceGate = maintenanceGate ?? new LiveMaintenanceGate();
     }
 
     public SimulationJobDetails? Latest => Volatile.Read(ref latest);
@@ -62,6 +65,7 @@ public sealed partial class SimulationCoordinator : BackgroundService, ISimulati
         RenewalStage? failureStage,
         CancellationToken cancellationToken)
     {
+        maintenanceGate.ThrowIfPaused();
         if (idempotencyKey == Guid.Empty)
         {
             throw new ArgumentException(
@@ -105,6 +109,8 @@ public sealed partial class SimulationCoordinator : BackgroundService, ISimulati
     {
         try
         {
+            await maintenanceGate.WaitUntilOpenAsync(stoppingToken)
+                .ConfigureAwait(false);
             store.Initialize(GetUtcNow());
             Publish(store.GetLatestJobWithEvidence());
 

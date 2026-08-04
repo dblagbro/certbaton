@@ -6,7 +6,11 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $LogPath,
 
-    [string] $InstallerPath
+    [string] $InstallerPath,
+
+    [switch] $AllowDeveloperSourceChange,
+
+    [switch] $AllowDeveloperDowngrade
 )
 
 Set-StrictMode -Version Latest
@@ -16,7 +20,12 @@ if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
     $InstallerPath = Join-Path $PackageRoot 'install-developer-package.ps1'
 }
 try {
-    $output = & $InstallerPath -PackageRoot $PackageRoot 2>&1
+    $installerArguments = @{
+        PackageRoot = $PackageRoot
+        AllowDeveloperSourceChange = $AllowDeveloperSourceChange
+        AllowDeveloperDowngrade = $AllowDeveloperDowngrade
+    }
+    $output = & $InstallerPath @installerArguments 2>&1
     $output | Out-File -LiteralPath $LogPath -Encoding UTF8
     $output
     exit 0

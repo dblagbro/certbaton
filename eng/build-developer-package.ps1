@@ -258,6 +258,17 @@ if ($sourceCommitAfterPublish -cne $sourceCommit) {
     throw 'The source commit changed while the developer package was built.'
 }
 
+$schemaSource = Get-Content -LiteralPath (
+    Join-Path $repositoryRoot `
+        'src\CertBaton.Persistence.Sqlite\SqliteSchema.cs') -Raw
+$schemaVersionMatch = [regex]::Match(
+    $schemaSource,
+    'public\s+const\s+int\s+CurrentVersion\s*=\s*(\d+)\s*;')
+if (-not $schemaVersionMatch.Success) {
+    throw 'Unable to derive the SQLite state-schema version from source.'
+}
+$currentStateSchemaVersion = [int]$schemaVersionMatch.Groups[1].Value
+
 $files = Get-ChildItem -LiteralPath $packageRoot -Recurse -File |
     Sort-Object FullName |
     ForEach-Object {
@@ -273,10 +284,16 @@ $files = Get-ChildItem -LiteralPath $packageRoot -Recurse -File |
 $manifest = [ordered]@{
     product = 'CertBaton'
     channel = 'developer-preview'
+    packageSchemaVersion = 2
     version = $packageVersion
     runtime = 'win-x64'
     selfContained = $true
     sourceCommit = $sourceCommit
+    stateSchema = [ordered]@{
+        current = $currentStateSchemaVersion
+        minimumReadable = 1
+        maximumReadable = $currentStateSchemaVersion
+    }
     builtAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
     files = @($files)
 }

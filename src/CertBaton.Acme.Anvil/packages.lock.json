@@ -1,0 +1,36 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net10.0": {
+      "Webprofusion.Certify.ACME.Anvil": {
+        "type": "Direct",
+        "requested": "[3.3.3, )",
+        "resolved": "3.3.3",
+        "contentHash": "EyLstTZhgiCb7pEgqa6MCH5Vd08SarxAmAbiCA7rAITuU474HOmiYYqsTjeY05F8iLT2elC4vScNm9I/p4l8pA==",
+        "dependencies": {
+          "BouncyCastle.Cryptography": "2.6.2",
+          "Newtonsoft.Json": "13.0.3"
+        }
+      },
+      "BouncyCastle.Cryptography": {
+        "type": "Transitive",
+        "resolved": "2.6.2",
+        "contentHash": "7oWOcvnntmMKNzDLsdxAYqApt+AjpRpP2CShjMfIa3umZ42UQMvH0tl1qAliYPNYO6vTdcGMqnRrCPmsfzTI1w=="
+      },
+      "Newtonsoft.Json": {
+        "type": "Transitive",
+        "resolved": "13.0.3",
+        "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
+      },
+      "certbaton.application": {
+        "type": "Project",
+        "dependencies": {
+          "CertBaton.Domain": "[0.1.0-dev, )"
+        }
+      },
+      "certbaton.domain": {
+        "type": "Project"
+      }
+    }
+  }
+}

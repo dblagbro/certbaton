@@ -2,7 +2,9 @@
 param(
     [string] $InstallRoot = (Join-Path $env:ProgramFiles 'CertBaton'),
 
-    [string] $DataRoot = (Join-Path $env:ProgramData 'CertBaton')
+    [string] $DataRoot = (Join-Path $env:ProgramData 'CertBaton'),
+
+    [switch] $MaintenanceExpected
 )
 
 Set-StrictMode -Version Latest
@@ -18,6 +20,8 @@ $serviceDacl =
     '(A;;LC;;;BU)'
 $uninstallKey =
     'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CertBatonDeveloper'
+$packageSchemaVersion = 2
+$maintenanceMarkerName = 'maintenance.lock'
 
 function Assert-ElevatedAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -193,6 +197,41 @@ function Assert-InstalledPayloadMatchesManifest {
     }
 }
 
+function Get-SecretInventory {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Path
+    )
+
+    $items = @(Get-ChildItem -LiteralPath $Path -Force)
+    $unexpected = @(
+        $items |
+            Where-Object {
+                $_.PSIsContainer -or
+                $_.Name -notmatch '^[0-9a-fA-F]{32}\.secret$' -or
+                $_.Length -lt 1 -or
+                $_.Length -gt (2 * 1024 * 1024)
+            }
+    )
+    Assert-Condition -Condition ($unexpected.Count -eq 0) `
+        -Message (
+            'The protected vault contains a temporary, residue, nested, ' +
+            'or malformed record.')
+
+    return @(
+        $items |
+            Sort-Object Name |
+            ForEach-Object {
+                $hash = Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256
+                [ordered]@{
+                    name = $_.Name
+                    size = $_.Length
+                    sha256 = $hash.Hash.ToLowerInvariant()
+                }
+            }
+    )
+}
+
 Assert-ElevatedAdministrator
 
 $requiredFiles = @(
@@ -203,7 +242,8 @@ $requiredFiles = @(
     (Join-Path $InstallRoot 'package-manifest.json'),
     $DataRoot,
     (Join-Path $DataRoot 'State'),
-    (Join-Path $DataRoot 'Backups')
+    (Join-Path $DataRoot 'Backups'),
+    (Join-Path $DataRoot 'Secrets')
 )
 foreach ($requiredFile in $requiredFiles) {
     Assert-Condition `
@@ -215,11 +255,57 @@ Assert-NoReparsePoint -Path $InstallRoot
 Assert-NoReparsePoint -Path $DataRoot
 Assert-NoReparsePoint -Path (Join-Path $DataRoot 'State')
 Assert-NoReparsePoint -Path (Join-Path $DataRoot 'Backups')
+Assert-NoReparsePoint -Path (Join-Path $DataRoot 'Secrets')
 Assert-NoReparsePointsInTree -Path $InstallRoot
 Assert-NoReparsePointsInTree -Path $DataRoot
 Assert-NoReparsePointsInTree -Path (Join-Path $DataRoot 'State')
 Assert-NoReparsePointsInTree -Path (Join-Path $DataRoot 'Backups')
+Assert-NoReparsePointsInTree -Path (Join-Path $DataRoot 'Secrets')
 Assert-InstalledPayloadMatchesManifest -Root $InstallRoot
+
+$manifest = Get-Content -LiteralPath (
+    Join-Path $InstallRoot 'package-manifest.json') -Raw | ConvertFrom-Json
+Assert-Condition `
+    -Condition (
+        $manifest.product -eq 'CertBaton' -and
+        $manifest.channel -eq 'developer-preview' -and
+        $manifest.packageSchemaVersion -eq $packageSchemaVersion -and
+        $manifest.stateSchema.current -ge 1 -and
+        $manifest.stateSchema.minimumReadable -ge 1 -and
+        $manifest.stateSchema.minimumReadable -le
+            $manifest.stateSchema.current -and
+        $manifest.stateSchema.maximumReadable -ge
+            $manifest.stateSchema.current) `
+    -Message 'The installed package compatibility metadata is invalid.'
+
+$installMetadata = Get-Content -LiteralPath (
+    Join-Path $InstallRoot 'install-metadata.json') -Raw | ConvertFrom-Json
+Assert-Condition `
+    -Condition (
+        $installMetadata.product -eq 'CertBaton' -and
+        $installMetadata.channel -eq 'developer-preview' -and
+        $installMetadata.packageSchemaVersion -eq $packageSchemaVersion -and
+        $installMetadata.version -ceq $manifest.version -and
+        $installMetadata.sourceCommit -ceq $manifest.sourceCommit -and
+        $installMetadata.stateSchemaVersion -eq
+            $manifest.stateSchema.current) `
+    -Message 'The installed metadata does not match the package manifest.'
+
+$maintenanceMarkerPath = Join-Path $DataRoot $maintenanceMarkerName
+if ($MaintenanceExpected) {
+    Assert-Condition `
+        -Condition (
+            Test-Path -LiteralPath $maintenanceMarkerPath -PathType Leaf) `
+        -Message 'The expected installation-maintenance marker is missing.'
+    Assert-NoReparsePoint -Path $maintenanceMarkerPath
+}
+else {
+    Assert-Condition `
+        -Condition (-not (Test-Path -LiteralPath $maintenanceMarkerPath)) `
+        -Message (
+            'An installation-maintenance marker remains; live renewal ' +
+            'must stay paused until repair is completed or rolled back.')
+}
 
 $serviceRecord = Get-CimInstance Win32_Service -Filter "Name='$serviceName'"
 Assert-Condition -Condition ($null -ne $serviceRecord) `
@@ -329,6 +415,11 @@ Assert-ProtectedAcl -Path (Join-Path $DataRoot 'Backups') -ExpectedRules @{
     'S-1-5-32-544' = $fullControl
     $serviceSidValue = $modify
 }
+Assert-ProtectedAcl -Path (Join-Path $DataRoot 'Secrets') -ExpectedRules @{
+    'S-1-5-18' = $fullControl
+    'S-1-5-32-544' = $fullControl
+    $serviceSidValue = $modify
+}
 
 Assert-Condition `
     -Condition ([Diagnostics.EventLog]::SourceExists($serviceName)) `
@@ -365,6 +456,29 @@ $health = $healthJson | ConvertFrom-Json
 Assert-Condition -Condition ($health.status -eq 'healthy') `
     -Message 'The installed service did not report healthy.'
 
+$secretsPath = Join-Path $DataRoot 'Secrets'
+$secretInventoryBefore = @(Get-SecretInventory -Path $secretsPath)
+$vaultJson = (& $cliPath vault probe --json 2>&1) -join [Environment]::NewLine
+Assert-Condition -Condition ($LASTEXITCODE -eq 0) `
+    -Message "The installed service vault probe failed: $vaultJson"
+$vault = $vaultJson | ConvertFrom-Json
+Assert-Condition `
+    -Condition (
+        $vault.status -eq 'healthy' -and
+        $vault.roundTripVerified -eq $true -and
+        $vault.temporaryRecordRemoved -eq $true) `
+    -Message 'The installed service vault did not pass its protected round trip.'
+$secretInventoryAfter = @(Get-SecretInventory -Path $secretsPath)
+$secretInventoryBeforeJson = $secretInventoryBefore |
+    ConvertTo-Json -Depth 4 -Compress
+$secretInventoryAfterJson = $secretInventoryAfter |
+    ConvertTo-Json -Depth 4 -Compress
+Assert-Condition `
+    -Condition ($secretInventoryBeforeJson -ceq $secretInventoryAfterJson) `
+    -Message (
+        'The installed vault inventory changed during its one-time round-trip ' +
+        'probe; a temporary or altered record remains.')
+
 [pscustomobject]@{
     Product = 'CertBaton'
     Channel = 'developer-preview'
@@ -375,6 +489,9 @@ Assert-Condition -Condition ($health.status -eq 'healthy') `
     InstallRoot = $InstallRoot
     DataRoot = $DataRoot
     Health = $health
+    Vault = $vault
+    MaintenanceExpected = [bool]$MaintenanceExpected
+    SecretRecordCount = $secretInventoryAfter.Count
     FirewallRulesAdded = 0
     VerifiedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
 } | ConvertTo-Json -Depth 5

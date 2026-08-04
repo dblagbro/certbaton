@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using CertBaton.Contracts;
 
@@ -61,6 +62,75 @@ public sealed class CertBatonPipeClient
                 timeProvider,
                 idempotencyKey,
                 failureStage,
+                options.ConnectTimeout),
+            cancellationToken);
+
+    public Task<IpcResponse> ProbeVaultAsync(
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateVaultProbe(
+                timeProvider,
+                options.ConnectTimeout),
+            cancellationToken);
+
+    public async Task<IpcResponse> ImportSshPrivateKeyAsync(
+        ReadOnlyMemory<byte> privateKey,
+        CancellationToken cancellationToken = default)
+    {
+        var request = IpcRequest.CreateCredentialImportSshPrivateKey(
+            timeProvider,
+            privateKey.Span,
+            options.ConnectTimeout);
+        try
+        {
+            return await SendAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            if (request.CredentialPayload?.Secret is { } secret)
+            {
+                CryptographicOperations.ZeroMemory(secret);
+            }
+        }
+    }
+
+    public Task<IpcResponse> EnrollTargetAsync(
+        TargetEnrollmentPayload payload,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateTargetEnrollment(
+                timeProvider,
+                payload,
+                options.ConnectTimeout),
+            cancellationToken);
+
+    public Task<IpcResponse> ListTargetsAsync(
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateTargetList(
+                timeProvider,
+                options.ConnectTimeout),
+            cancellationToken);
+
+    public Task<IpcResponse> StartRenewalAsync(
+        Guid targetId,
+        Guid idempotencyKey,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateRenewalStart(
+                timeProvider,
+                new RenewalStartPayload(targetId, idempotencyKey),
+                options.ConnectTimeout),
+            cancellationToken);
+
+    public Task<IpcResponse> GetRenewalAsync(
+        Guid operationId,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            IpcRequest.CreateRenewalGet(
+                timeProvider,
+                new RenewalQueryPayload(operationId),
                 options.ConnectTimeout),
             cancellationToken);
 

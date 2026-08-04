@@ -15,6 +15,11 @@
           "Microsoft.Testing.Extensions.TrxReport": "2.3.3"
         }
       },
+      "BouncyCastle.Cryptography": {
+        "type": "Transitive",
+        "resolved": "2.6.2",
+        "contentHash": "7oWOcvnntmMKNzDLsdxAYqApt+AjpRpP2CShjMfIa3umZ42UQMvH0tl1qAliYPNYO6vTdcGMqnRrCPmsfzTI1w=="
+      },
       "Microsoft.ApplicationInsights": {
         "type": "Transitive",
         "resolved": "2.23.0",
@@ -422,6 +427,13 @@
           "System.Diagnostics.EventLog": "10.0.10"
         }
       },
+      "certbaton.acme.anvil": {
+        "type": "Project",
+        "dependencies": {
+          "CertBaton.Application": "[0.1.0-dev, )",
+          "Webprofusion.Certify.ACME.Anvil": "[3.3.3, )"
+        }
+      },
       "certbaton.application": {
         "type": "Project",
         "dependencies": {
@@ -458,16 +470,39 @@
           "SQLitePCLRaw.lib.e_sqlite3": "[3.53.3, )"
         }
       },
+      "certbaton.remote.ssh": {
+        "type": "Project",
+        "dependencies": {
+          "CertBaton.Application": "[0.1.0-dev, )",
+          "SSH.NET": "[2025.1.0, )"
+        }
+      },
+      "certbaton.security.windows": {
+        "type": "Project",
+        "dependencies": {
+          "CertBaton.Application": "[0.1.0-dev, )"
+        }
+      },
       "certbaton.service": {
         "type": "Project",
         "dependencies": {
+          "CertBaton.Acme.Anvil": "[0.1.0-dev, )",
           "CertBaton.Application": "[0.1.0-dev, )",
           "CertBaton.Contracts": "[0.1.0-dev, )",
           "CertBaton.Domain": "[0.1.0-dev, )",
           "CertBaton.Ipc.NamedPipes": "[0.1.0-dev, )",
           "CertBaton.Persistence.Sqlite": "[0.1.0-dev, )",
+          "CertBaton.Remote.Ssh": "[0.1.0-dev, )",
+          "CertBaton.Security.Windows": "[0.1.0-dev, )",
+          "CertBaton.Verification": "[0.1.0-dev, )",
           "Microsoft.Extensions.Hosting": "[10.0.10, )",
           "Microsoft.Extensions.Hosting.WindowsServices": "[10.0.10, )"
+        }
+      },
+      "certbaton.verification": {
+        "type": "Project",
+        "dependencies": {
+          "CertBaton.Application": "[0.1.0-dev, )"
         }
       },
       "certbatonctl": {
@@ -548,6 +583,26 @@
         "requested": "[3.53.3, )",
         "resolved": "3.53.3",
         "contentHash": "ZXiSbBkrlw2Of/dBqny/qtQol7dlThrUD8zH/jkQicCFm2yn2BbhKsQW0+YHAzhANWz4ZJCz7gvo88BwluVhkA=="
+      },
+      "SSH.NET": {
+        "type": "CentralTransitive",
+        "requested": "[2025.1.0, )",
+        "resolved": "2025.1.0",
+        "contentHash": "jrnbtf0ItVaXAe6jE8X/kSLa6uC+0C+7W1vepcnRQB/rD88qy4IxG7Lf1FIbWmkoc4iVXv0pKrz+Wc6J4ngmHw==",
+        "dependencies": {
+          "BouncyCastle.Cryptography": "2.6.2",
+          "Microsoft.Extensions.Logging.Abstractions": "8.0.3"
+        }
+      },
+      "Webprofusion.Certify.ACME.Anvil": {
+        "type": "CentralTransitive",
+        "requested": "[3.3.3, )",
+        "resolved": "3.3.3",
+        "contentHash": "EyLstTZhgiCb7pEgqa6MCH5Vd08SarxAmAbiCA7rAITuU474HOmiYYqsTjeY05F8iLT2elC4vScNm9I/p4l8pA==",
+        "dependencies": {
+          "BouncyCastle.Cryptography": "2.6.2",
+          "Newtonsoft.Json": "13.0.3"
+        }
       }
     }
   }

@@ -11,11 +11,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\CertBaton.Acme.Anvil\CertBaton.Acme.Anvil.csproj" />
     <ProjectReference Include="..\CertBaton.Application\CertBaton.Application.csproj" />
     <ProjectReference Include="..\CertBaton.Contracts\CertBaton.Contracts.csproj" />
     <ProjectReference Include="..\CertBaton.Domain\CertBaton.Domain.csproj" />
     <ProjectReference Include="..\CertBaton.Ipc.NamedPipes\CertBaton.Ipc.NamedPipes.csproj" />
     <ProjectReference Include="..\CertBaton.Persistence.Sqlite\CertBaton.Persistence.Sqlite.csproj" />
+    <ProjectReference Include="..\CertBaton.Remote.Ssh\CertBaton.Remote.Ssh.csproj" />
+    <ProjectReference Include="..\CertBaton.Security.Windows\CertBaton.Security.Windows.csproj" />
+    <ProjectReference Include="..\CertBaton.Verification\CertBaton.Verification.csproj" />
   </ItemGroup>
 
   <ItemGroup>

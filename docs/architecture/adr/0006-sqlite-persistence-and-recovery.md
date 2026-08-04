@@ -1,7 +1,8 @@
 # ADR 0006: Service-owned SQLite persistence and deterministic recovery
 
-- Status: Accepted for Increment 1
+- Status: Accepted for pre-alpha local persistence; production recovery gate open
 - Date: 2026-07-29
+- Updated: 2026-07-31
 - Decision owners: CertBaton maintainers
 
 ## Context
@@ -11,10 +12,12 @@ Desktop application closes. A process or machine interruption must never turn
 an uncertain operation into a reported success. The store is local operational
 state, not a secret vault and not an administrator-resistant audit ledger.
 
-Increment 1 needs a small, testable persistence layer for simulated renewal
-jobs. Later increments will add targets, schedules, deployments, alerts, and
-opaque references to secrets protected by the vault selected under ADR 0003.
-Secret values are prohibited from this database.
+Increment 1 needed a small, testable persistence layer for simulated renewal
+jobs. The live pre-alpha slice now also needs targets, connection pins,
+deployment plans, renewal policy, ACME account metadata, operations,
+write-ahead remote intents, certificate metadata, and sanitized evidence.
+Secret values remain prohibited from this database; records refer to secrets
+in the ADR 0003 vault by opaque identifier.
 
 ## Decision
 
@@ -95,9 +98,12 @@ Use forward-only embedded SQL migrations with:
 - migration names and SHA-256 checksums; and
 - parameterized values only.
 
-Increment 1 implements the minimum durable job and evidence schema. Later
-migrations may add targets, schedules, job attempts, operation intents, typed
-step checkpoints, alerts, and retention metadata. A failed migration never
+Schema version 1 contains the synthetic job and evidence foundation. Version 2
+adds the production domain foundation, and version 3 adds live orchestration,
+including target issuance metadata, raw exact SSH host-key pins, enrollments,
+ACME account records, write-ahead intents, and certificate artifacts. The
+migrations are forward-only and checksum-validated. Future migrations may add
+alerts, richer checkpoints, and retention metadata. A failed migration never
 causes the database to be silently recreated.
 
 Before a future production schema migration, the service must verify the store
@@ -112,12 +118,16 @@ Persist each state transition, its sanitized evidence, and the new checkpoint
 in the same transaction.
 
 - Job creation is idempotent through a unique request key.
-- Increment 1 permits only one active simulation globally; the production
-  schema must enforce one applicable active job per target.
+- Increment 1 permits only one active simulation globally. Live operations use
+  a target-scoped active-operation constraint and a stable request key so a
+  retry observes the existing durable operation.
 - A durable insertion sequence, not the wall clock, defines job recency.
 - A service execution epoch identifies the process that owns an attempt and is
   required on every stage-evidence and completion write.
-- Work owned by an older epoch is interrupted during startup recovery.
+- Work owned by an older epoch is reconciled during startup recovery. A run
+  that stopped before activation is closed as interrupted; a run with a
+  planned, applied, or uncertain activation intent becomes
+  `rollback-required` and is not replayed automatically.
 - Simulated and other proven-idempotent work may be retried from a durable
   boundary.
 - A remote mutating step with an uncertain outcome is never blindly replayed.
@@ -135,9 +145,18 @@ This is at-least-once execution with operation-level idempotency and
 reconciliation. CertBaton does not claim exactly-once remote effects.
 
 For the Increment 1 simulator, an incomplete running job found at startup is
-marked `interrupted` with recovery evidence. It is not promoted to success and
-is not automatically replayed. A later increment may resume idempotent stages
-after the durable step/intent model is implemented and tested.
+marked `interrupted` with recovery evidence. For the live slice, queued work
+can be claimed by the new Service epoch, but incomplete remote-mutating work is
+classified from durable intents as described above. Local fake-workflow and
+persistence tests cover these state rules; process-kill testing through every
+real SSH/ACME boundary is still required.
+
+The pre-alpha scheduler scans due targets once per minute. A newly enrolled
+target with automatic renewal enabled is due immediately. On success it uses
+the certificate expiry and configured renewal window; on failure it uses the
+configured check interval. Production-grade jitter, exponential backoff,
+rate-limit-aware retry, global workload policy, and unattended alerts remain
+open work.
 
 ## Retention direction
 
@@ -192,4 +211,5 @@ the Microsoft provider already covers.
 - Local administrators can inspect or tamper with local operational state.
   CertBaton does not claim local non-repudiation against an administrator.
 - Production use remains blocked on real MSI-created directory ACL, migration,
-  corruption, disk-full, locked-store, backup/restore, and process-kill tests.
+  corruption, disk-full, locked-store, backup/restore, and process-kill tests,
+  including interruption before and after each remote intent.

@@ -1,7 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
 using CertBaton.Application.Simulation.Persistence;
 using CertBaton.Domain.Renewals;
 using Microsoft.Data.Sqlite;
@@ -15,11 +13,10 @@ namespace CertBaton.Persistence.Sqlite;
 /// </summary>
 public sealed class SqliteSimulationJobStore : ISimulationJobStore
 {
-    public const int ApplicationId = 0x4342544E;
-    public const int CurrentSchemaVersion = 1;
-    public const int BusyTimeoutMilliseconds = 5_000;
+    public const int ApplicationId = SqliteSchema.ApplicationId;
+    public const int CurrentSchemaVersion = SqliteSchema.CurrentVersion;
+    public const int BusyTimeoutMilliseconds = SqliteSchema.BusyTimeoutMilliseconds;
 
-    private const string V1MigrationName = "0001_simulation_jobs";
     private const string RecoveryCode = "persistence.recovered_interrupted";
     private const string RecoveryDescription =
         "The service recovered a job whose prior execution ended without a terminal result.";
@@ -40,106 +37,18 @@ public sealed class SqliteSimulationJobStore : ISimulationJobStore
         """;
     private const string JobProjectionSql =
         "SELECT " + JobProjectionColumns + " FROM jobs";
-    private const string V1SchemaSql =
-        """
-        CREATE TABLE schema_migrations (
-            version INTEGER NOT NULL PRIMARY KEY CHECK (version > 0),
-            name TEXT NOT NULL UNIQUE CHECK (length(name) BETWEEN 1 AND 100),
-            checksum_sha256 TEXT NOT NULL CHECK (length(checksum_sha256) = 64),
-            applied_at_ms INTEGER NOT NULL
-        ) STRICT;
-
-        CREATE TABLE jobs (
-            job_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id TEXT NOT NULL UNIQUE CHECK (length(job_id) = 36),
-            request_key TEXT NOT NULL UNIQUE
-                CHECK (length(request_key) BETWEEN 1 AND 200),
-            failure_stage_index INTEGER NULL
-                CHECK (failure_stage_index BETWEEN 0 AND 7),
-            status TEXT NOT NULL
-                CHECK (status IN (
-                    'Queued',
-                    'Running',
-                    'Succeeded',
-                    'Failed',
-                    'Cancelled',
-                    'Interrupted'
-                )),
-            created_at_ms INTEGER NOT NULL,
-            updated_at_ms INTEGER NOT NULL,
-            execution_epoch TEXT NULL CHECK (
-                execution_epoch IS NULL OR length(execution_epoch) = 36
-            ),
-            claimed_at_ms INTEGER NULL,
-            completed_at_ms INTEGER NULL,
-            CHECK (
-                (status = 'Queued'
-                    AND execution_epoch IS NULL
-                    AND claimed_at_ms IS NULL
-                    AND completed_at_ms IS NULL)
-                OR
-                (status = 'Running'
-                    AND execution_epoch IS NOT NULL
-                    AND claimed_at_ms IS NOT NULL
-                    AND completed_at_ms IS NULL)
-                OR
-                (status IN (
-                        'Succeeded',
-                        'Failed',
-                        'Cancelled',
-                        'Interrupted'
-                    )
-                    AND completed_at_ms IS NOT NULL)
-            )
-        ) STRICT;
-
-        CREATE TABLE evidence (
-            job_id TEXT NOT NULL,
-            sequence INTEGER NOT NULL CHECK (sequence > 0),
-            kind TEXT NOT NULL
-                CHECK (kind IN ('Stage', 'Terminal', 'Recovery')),
-            stage_index INTEGER NULL CHECK (stage_index BETWEEN 0 AND 7),
-            stage_outcome TEXT NULL
-                CHECK (stage_outcome IN ('Succeeded', 'Failed', 'Cancelled')),
-            recorded_at_ms INTEGER NOT NULL,
-            code TEXT NOT NULL CHECK (length(code) BETWEEN 1 AND 128),
-            description TEXT NOT NULL CHECK (length(description) BETWEEN 1 AND 1024),
-            PRIMARY KEY (job_id, sequence),
-            FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE RESTRICT,
-            CHECK (
-                (kind = 'Stage'
-                    AND stage_index IS NOT NULL
-                    AND stage_outcome IS NOT NULL)
-                OR
-                (kind IN ('Terminal', 'Recovery')
-                    AND stage_index IS NULL
-                    AND stage_outcome IS NULL)
-            )
-        ) STRICT;
-
-        CREATE UNIQUE INDEX ux_jobs_single_active
-        ON jobs ((1))
-        WHERE status IN ('Queued', 'Running');
-        """;
-    private static readonly Version minimumSqliteVersion = new(3, 51, 3);
-    private static readonly object nativeInitializationGate = new();
     private readonly object initializationGate = new();
-    private readonly string databasePath;
+    private readonly SqliteDatabase database;
     private bool initialized;
-    private Version? runtimeSqliteVersion;
-    private static bool nativeProviderInitialized;
 
     public SqliteSimulationJobStore(string databasePath)
     {
-        this.databasePath = ValidateLocalAbsolutePath(databasePath);
+        database = new SqliteDatabase(databasePath);
     }
 
-    public string DatabasePath => databasePath;
+    public string DatabasePath => database.DatabasePath;
 
-    public Version RuntimeSqliteVersion =>
-        runtimeSqliteVersion
-        ?? throw new InvalidOperationException(
-            "The store must be initialized before its SQLite runtime version is available.");
+    public Version RuntimeSqliteVersion => database.RuntimeSqliteVersion;
 
     public void Initialize(DateTimeOffset recoveredAtUtc)
     {
@@ -150,15 +59,8 @@ public sealed class SqliteSimulationJobStore : ISimulationJobStore
                 return;
             }
 
-            InitializeNativeProvider();
-            Directory.CreateDirectory(
-                Path.GetDirectoryName(databasePath)
-                ?? throw new InvalidOperationException(
-                    "The database path does not have a parent directory."));
-
-            using var connection = OpenConfiguredConnection();
-            runtimeSqliteVersion = ReadAndValidateRuntimeVersion(connection);
-            EnsureSchema(connection, recoveredAtUtc);
+            database.Initialize(recoveredAtUtc);
+            using var connection = database.OpenConnection();
             RecoverRunningJobs(connection, recoveredAtUtc);
             initialized = true;
         }
@@ -176,7 +78,7 @@ public sealed class SqliteSimulationJobStore : ISimulationJobStore
         ValidateOptionalStage(failureStage, nameof(failureStage));
         var createdAtMilliseconds = ToUnixMilliseconds(createdAtUtc);
 
-        using var connection = OpenConfiguredConnection();
+        using var connection = database.OpenConnection();
         using var transaction = connection.BeginTransaction(deferred: false);
         var existing = FindJobByRequestKey(connection, transaction, requestKey);
         if (existing is not null)
@@ -238,7 +140,7 @@ public sealed class SqliteSimulationJobStore : ISimulationJobStore
         ValidateGuid(executionEpoch, nameof(executionEpoch));
         var claimedAtMilliseconds = ToUnixMilliseconds(claimedAtUtc);
 
-        using var connection = OpenConfiguredConnection();
+        using var connection = database.OpenConnection();
         using var transaction = connection.BeginTransaction(deferred: false);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -291,7 +193,7 @@ public sealed class SqliteSimulationJobStore : ISimulationJobStore
         ValidateEvidenceText(code, description);
         var recordedAtMilliseconds = ToUnixMilliseconds(recordedAtUtc);
 
-        using var connection = OpenConfiguredConnection();
+        using var connection = database.OpenConnection();
         using var transaction = connection.BeginTransaction(deferred: false);
         EnsureJobIsOwnedByExecutionEpoch(
             connection,
@@ -333,7 +235,7 @@ public sealed class SqliteSimulationJobStore : ISimulationJobStore
         ValidateEvidenceText(code, description);
         var completedAtMilliseconds = ToUnixMilliseconds(completedAtUtc);
 
-        using var connection = OpenConfiguredConnection();
+        using var connection = database.OpenConnection();
         using var transaction = connection.BeginTransaction(deferred: false);
         EnsureJobIsOwnedByExecutionEpoch(
             connection,
@@ -380,7 +282,7 @@ public sealed class SqliteSimulationJobStore : ISimulationJobStore
     {
         EnsureInitialized();
         ValidateGuid(jobId, nameof(jobId));
-        using var connection = OpenConfiguredConnection();
+        using var connection = database.OpenConnection();
         return FindJob(connection, null, jobId);
     }
 
@@ -388,7 +290,7 @@ public sealed class SqliteSimulationJobStore : ISimulationJobStore
     {
         EnsureInitialized();
         ValidateGuid(jobId, nameof(jobId));
-        using var connection = OpenConfiguredConnection();
+        using var connection = database.OpenConnection();
         using var transaction = connection.BeginTransaction();
         var job = FindJob(connection, transaction, jobId);
         if (job is null)
@@ -405,7 +307,7 @@ public sealed class SqliteSimulationJobStore : ISimulationJobStore
     public SimulationJobDetails? GetLatestJobWithEvidence()
     {
         EnsureInitialized();
-        using var connection = OpenConfiguredConnection();
+        using var connection = database.OpenConnection();
         using var transaction = connection.BeginTransaction();
         SimulationJobSnapshot? job;
         using (var command = connection.CreateCommand())
@@ -436,278 +338,8 @@ public sealed class SqliteSimulationJobStore : ISimulationJobStore
     {
         EnsureInitialized();
         ValidateGuid(jobId, nameof(jobId));
-        using var connection = OpenConfiguredConnection();
+        using var connection = database.OpenConnection();
         return ReadEvidence(connection, null, jobId);
-    }
-
-    private static void InitializeNativeProvider()
-    {
-        lock (nativeInitializationGate)
-        {
-            if (nativeProviderInitialized)
-            {
-                return;
-            }
-
-            SQLitePCL.Batteries_V2.Init();
-            nativeProviderInitialized = true;
-        }
-    }
-
-    private SqliteConnection OpenConfiguredConnection()
-    {
-        var connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Private,
-            Pooling = false,
-            DefaultTimeout = BusyTimeoutMilliseconds / 1_000,
-        }.ToString();
-        var connection = new SqliteConnection(connectionString);
-        connection.Open();
-
-        try
-        {
-            SetAndVerifyPragmas(connection);
-            return connection;
-        }
-        catch
-        {
-            connection.Dispose();
-            throw;
-        }
-    }
-
-    private static void SetAndVerifyPragmas(SqliteConnection connection)
-    {
-        using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "PRAGMA journal_mode = DELETE;";
-            var journalMode = Convert.ToString(
-                command.ExecuteScalar(),
-                CultureInfo.InvariantCulture);
-            if (!string.Equals(journalMode, "delete", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException(
-                    "SQLite did not accept DELETE journal mode.");
-            }
-        }
-
-        using (var command = connection.CreateCommand())
-        {
-            command.CommandText =
-                $"""
-                PRAGMA synchronous = EXTRA;
-                PRAGMA foreign_keys = ON;
-                PRAGMA trusted_schema = OFF;
-                PRAGMA busy_timeout = {BusyTimeoutMilliseconds};
-                """;
-            _ = command.ExecuteNonQuery();
-        }
-
-        VerifyPragmaInteger(connection, "PRAGMA synchronous;", 3);
-        VerifyPragmaInteger(connection, "PRAGMA foreign_keys;", 1);
-        VerifyPragmaInteger(connection, "PRAGMA trusted_schema;", 0);
-        VerifyPragmaInteger(
-            connection,
-            "PRAGMA busy_timeout;",
-            BusyTimeoutMilliseconds);
-    }
-
-    private static void VerifyPragmaInteger(
-        SqliteConnection connection,
-        string commandText,
-        long expected)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = commandText;
-        var actual = Convert.ToInt64(
-            command.ExecuteScalar(),
-            CultureInfo.InvariantCulture);
-        if (actual != expected)
-        {
-            throw new InvalidOperationException(
-                $"SQLite setting verification failed for {commandText}");
-        }
-    }
-
-    private static Version ReadAndValidateRuntimeVersion(SqliteConnection connection)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT sqlite_version();";
-        var versionText = Convert.ToString(
-            command.ExecuteScalar(),
-            CultureInfo.InvariantCulture);
-        if (!Version.TryParse(versionText, out var version))
-        {
-            throw new InvalidOperationException(
-                "The SQLite runtime returned an invalid version.");
-        }
-
-        if (version < minimumSqliteVersion)
-        {
-            throw new NotSupportedException(
-                $"SQLite {minimumSqliteVersion} or newer is required.");
-        }
-
-        return version;
-    }
-
-    private static void EnsureSchema(
-        SqliteConnection connection,
-        DateTimeOffset initializedAtUtc)
-    {
-        var applicationId = ReadPragmaInteger(connection, "PRAGMA application_id;");
-        if (applicationId == 0)
-        {
-            if (CountApplicationSchemaObjects(connection) != 0)
-            {
-                throw new InvalidOperationException(
-                    "The database has content but no CertBaton application identifier.");
-            }
-
-            ApplyV1Migration(connection, initializedAtUtc);
-        }
-        else if (applicationId != ApplicationId)
-        {
-            throw new InvalidOperationException(
-                "The database does not belong to CertBaton.");
-        }
-
-        ValidateV1Schema(connection);
-    }
-
-    private static long ReadPragmaInteger(
-        SqliteConnection connection,
-        string commandText)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = commandText;
-        return Convert.ToInt64(
-            command.ExecuteScalar(),
-            CultureInfo.InvariantCulture);
-    }
-
-    private static long CountApplicationSchemaObjects(SqliteConnection connection)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText =
-            """
-            SELECT COUNT(*)
-            FROM sqlite_schema
-            WHERE name NOT LIKE 'sqlite_%';
-            """;
-        return Convert.ToInt64(
-            command.ExecuteScalar(),
-            CultureInfo.InvariantCulture);
-    }
-
-    private static void ApplyV1Migration(
-        SqliteConnection connection,
-        DateTimeOffset appliedAtUtc)
-    {
-        using var transaction = connection.BeginTransaction(deferred: false);
-        using (var command = connection.CreateCommand())
-        {
-            command.Transaction = transaction;
-            command.CommandText = V1SchemaSql;
-            _ = command.ExecuteNonQuery();
-        }
-
-        using (var command = connection.CreateCommand())
-        {
-            command.Transaction = transaction;
-            command.CommandText =
-                """
-                INSERT INTO schema_migrations (
-                    version,
-                    name,
-                    checksum_sha256,
-                    applied_at_ms
-                )
-                VALUES (
-                    $version,
-                    $name,
-                    $checksum_sha256,
-                    $applied_at_ms
-                );
-                """;
-            command.Parameters.AddWithValue("$version", CurrentSchemaVersion);
-            command.Parameters.AddWithValue("$name", V1MigrationName);
-            command.Parameters.AddWithValue("$checksum_sha256", V1Checksum);
-            command.Parameters.AddWithValue(
-                "$applied_at_ms",
-                ToUnixMilliseconds(appliedAtUtc));
-            _ = command.ExecuteNonQuery();
-        }
-
-        using (var command = connection.CreateCommand())
-        {
-            command.Transaction = transaction;
-            command.CommandText =
-                $"""
-                PRAGMA application_id = {ApplicationId};
-                PRAGMA user_version = {CurrentSchemaVersion};
-                """;
-            _ = command.ExecuteNonQuery();
-        }
-
-        transaction.Commit();
-    }
-
-    private static void ValidateV1Schema(SqliteConnection connection)
-    {
-        if (ReadPragmaInteger(connection, "PRAGMA application_id;") != ApplicationId)
-        {
-            throw new InvalidOperationException(
-                "The CertBaton database application identifier is invalid.");
-        }
-
-        if (ReadPragmaInteger(connection, "PRAGMA user_version;") != CurrentSchemaVersion)
-        {
-            throw new NotSupportedException(
-                "The CertBaton database schema version is not supported.");
-        }
-
-        using (var command = connection.CreateCommand())
-        {
-            command.CommandText =
-                """
-                SELECT name, checksum_sha256
-                FROM schema_migrations
-                WHERE version = $version;
-                """;
-            command.Parameters.AddWithValue("$version", CurrentSchemaVersion);
-            using var reader = command.ExecuteReader();
-            if (!reader.Read() ||
-                !string.Equals(reader.GetString(0), V1MigrationName, StringComparison.Ordinal) ||
-                !string.Equals(reader.GetString(1), V1Checksum, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    "The CertBaton database migration metadata is invalid.");
-            }
-        }
-
-        using (var command = connection.CreateCommand())
-        {
-            command.CommandText =
-                """
-                SELECT COUNT(*)
-                FROM pragma_table_list
-                WHERE schema = 'main'
-                  AND name IN ('schema_migrations', 'jobs', 'evidence')
-                  AND strict = 1;
-                """;
-            var strictTableCount = Convert.ToInt64(
-                command.ExecuteScalar(),
-                CultureInfo.InvariantCulture);
-            if (strictTableCount != 3)
-            {
-                throw new InvalidOperationException(
-                    "The CertBaton database is missing a required STRICT table.");
-            }
-        }
     }
 
     private static void RecoverRunningJobs(
@@ -1142,44 +774,6 @@ public sealed class SqliteSimulationJobStore : ISimulationJobStore
         }
     }
 
-    private static string ValidateLocalAbsolutePath(string databasePath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
-        if (!Path.IsPathFullyQualified(databasePath))
-        {
-            throw new ArgumentException(
-                "The SQLite database path must be absolute.",
-                nameof(databasePath));
-        }
-
-        var fullPath = Path.GetFullPath(databasePath);
-        if (fullPath.StartsWith(@"\\", StringComparison.Ordinal))
-        {
-            throw new ArgumentException(
-                "The SQLite database path must use local storage.",
-                nameof(databasePath));
-        }
-
-        var root = Path.GetPathRoot(fullPath);
-        if (string.IsNullOrWhiteSpace(root))
-        {
-            throw new ArgumentException(
-                "The SQLite database path must have a local volume root.",
-                nameof(databasePath));
-        }
-
-        var drive = new DriveInfo(root);
-        if (drive.DriveType == DriveType.Network ||
-            !string.Equals(drive.DriveFormat, "NTFS", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException(
-                "The SQLite database path must be on a local NTFS volume.",
-                nameof(databasePath));
-        }
-
-        return fullPath;
-    }
-
     private static void ValidateRequestKey(string requestKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(requestKey);
@@ -1320,7 +914,4 @@ public sealed class SqliteSimulationJobStore : ISimulationJobStore
         }
     }
 
-    private static string V1Checksum =>
-        Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(V1SchemaSql)));
 }

@@ -28,7 +28,7 @@ public sealed class SqliteSimulationJobStoreTests
     }
 
     [TestMethod]
-    public void InitializeCreatesIdentifiedStrictV1SchemaWithPatchedRuntime()
+    public void InitializeCreatesIdentifiedStrictSchemaWithPatchedRuntime()
     {
         var (store, databasePath) = CreateStore();
 

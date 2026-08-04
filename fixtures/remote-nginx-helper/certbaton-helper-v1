@@ -1,0 +1,879 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+export PATH
+umask 077
+
+readonly CONFIG_DIR='/etc/certbaton'
+readonly CONFIG_PATH='/etc/certbaton/helper-v1.conf'
+readonly LOCK_DIR='/run/certbaton'
+readonly LOCK_PATH='/run/certbaton/helper-v1.lock'
+
+SSH_USER=''
+INCOMING_ROOT=''
+RELEASE_ROOT=''
+BOOTSTRAP_TARGET=''
+SERVER_NAME=''
+NGINX_MODE=''
+NGINX_CONTAINER=''
+
+STATE_STATUS=''
+STATE_PREVIOUS=''
+CLEANUP_PATH=''
+
+fail() {
+  local code="$1"
+  local message="$2"
+  printf '{"version":1,"success":false,"code":"%s","message":"%s"}\n' \
+    "$code" "$message" >&2
+  exit 1
+}
+
+cleanup_temporary_path() {
+  [[ -n "${CLEANUP_PATH:-}" && -n "${RELEASE_ROOT:-}" ]] || return 0
+  case "$CLEANUP_PATH" in
+    "$RELEASE_ROOT"/.release-*.tmp | \
+      "$RELEASE_ROOT"/.current-*.tmp | \
+      "$RELEASE_ROOT"/.state/*.tmp.*) ;;
+    *) return 0 ;;
+  esac
+
+  if [[ -d "$CLEANUP_PATH" && ! -L "$CLEANUP_PATH" ]]; then
+    rm -rf -- "$CLEANUP_PATH" >/dev/null 2>&1 || true
+  else
+    rm -f -- "$CLEANUP_PATH" >/dev/null 2>&1 || true
+  fi
+  CLEANUP_PATH=''
+}
+
+trap cleanup_temporary_path EXIT
+
+require_root() {
+  [[ "$(id -u)" == '0' ]] || fail 'helper.root_required' 'The helper must run as root.'
+}
+
+validate_absolute_path() {
+  local value="$1"
+  (( ${#value} <= 1024 )) || return 1
+  [[ "$value" =~ ^/[A-Za-z0-9._/-]+$ ]] || return 1
+  [[ "$value" != *'//'* ]] || return 1
+  [[ ! "$value" =~ (^|/)[.]{1,2}(/|$) ]] || return 1
+  [[ "$value" != '/' && ! "$value" =~ /$ ]]
+}
+
+path_is_within() {
+  local child="$1"
+  local parent="$2"
+  [[ "$child" == "$parent" || "$child" == "$parent/"* ]]
+}
+
+validate_secure_ancestry() {
+  local path="$1"
+  local current owner mode resolved
+  [[ -d "$path" && ! -L "$path" ]] || return 1
+  resolved="$(realpath -e -- "$path")" || return 1
+  [[ "$resolved" == "$path" ]] || return 1
+
+  current="$path"
+  while true; do
+    [[ -d "$current" && ! -L "$current" ]] || return 1
+    owner="$(stat -c '%u' -- "$current")" || return 1
+    mode="$(stat -c '%a' -- "$current")" || return 1
+    [[ "$owner" == '0' ]] || return 1
+    (( (8#$mode & 8#022) == 0 )) || return 1
+    [[ "$current" == '/' ]] && break
+    current="${current%/*}"
+    [[ -n "$current" ]] || current='/'
+  done
+}
+
+validate_secure_creation_parent() {
+  local path="$1"
+  local current="$path"
+  while [[ ! -e "$current" && ! -L "$current" ]]; do
+    current="${current%/*}"
+    [[ -n "$current" ]] || current='/'
+  done
+  [[ ! -L "$current" ]] || return 1
+  validate_secure_ancestry "$current"
+}
+
+validate_dns_name() {
+  local name="$1"
+  local label
+  local -a labels=()
+  (( ${#name} <= 253 )) || return 1
+  [[ "$name" == "${name,,}" ]] || return 1
+  [[ "$name" != *'..'* ]] || return 1
+  [[ "$name" == *.* ]] || return 1
+  IFS='.' read -r -a labels <<< "$name"
+  for label in "${labels[@]}"; do
+    (( ${#label} >= 1 && ${#label} <= 63 )) || return 1
+    [[ "$label" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || return 1
+  done
+}
+
+load_config() {
+  [[ -d "$CONFIG_DIR" && ! -L "$CONFIG_DIR" ]] ||
+    fail 'helper.config_directory' 'The helper configuration directory is missing or unsafe.'
+  validate_secure_ancestry "$CONFIG_DIR" ||
+    fail 'helper.config_directory' 'The helper configuration directory has unsafe ownership, permissions, or ancestry.'
+  [[ -f "$CONFIG_PATH" && ! -L "$CONFIG_PATH" ]] ||
+    fail 'helper.config_missing' 'The root-owned helper configuration is missing.'
+
+  local config_owner config_mode config_size
+  config_owner="$(stat -c '%u' -- "$CONFIG_PATH")"
+  config_mode="$(stat -c '%a' -- "$CONFIG_PATH")"
+  config_size="$(stat -c '%s' -- "$CONFIG_PATH")"
+  [[ "$config_owner" == '0' ]] ||
+    fail 'helper.config_owner' 'The helper configuration is not root-owned.'
+  (( (8#$config_mode & 8#022) == 0 )) ||
+    fail 'helper.config_mode' 'The helper configuration is writable by group or other.'
+  (( config_size > 0 && config_size <= 16384 )) ||
+    fail 'helper.config_size' 'The helper configuration is empty or exceeds its size limit.'
+
+  SSH_USER=''
+  INCOMING_ROOT=''
+  RELEASE_ROOT=''
+  BOOTSTRAP_TARGET=''
+  SERVER_NAME=''
+  NGINX_MODE=''
+  NGINX_CONTAINER=''
+
+  local key value
+  while IFS='=' read -r key value || [[ -n "$key" ]]; do
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    [[ "$key" =~ ^[a-z_]+$ && -n "$value" ]] ||
+      fail 'helper.config_invalid' 'A helper configuration line is invalid.'
+    [[ "$value" != *[$' \t\r\n']* ]] ||
+      fail 'helper.config_invalid' 'Helper configuration values cannot contain whitespace.'
+    case "$key" in
+      ssh_user)
+        [[ -z "$SSH_USER" ]] || fail 'helper.config_duplicate' 'The helper configuration repeats a key.'
+        SSH_USER="$value"
+        ;;
+      incoming_root)
+        [[ -z "$INCOMING_ROOT" ]] || fail 'helper.config_duplicate' 'The helper configuration repeats a key.'
+        INCOMING_ROOT="$value"
+        ;;
+      release_root)
+        [[ -z "$RELEASE_ROOT" ]] || fail 'helper.config_duplicate' 'The helper configuration repeats a key.'
+        RELEASE_ROOT="$value"
+        ;;
+      bootstrap_target)
+        [[ -z "$BOOTSTRAP_TARGET" ]] || fail 'helper.config_duplicate' 'The helper configuration repeats a key.'
+        BOOTSTRAP_TARGET="$value"
+        ;;
+      server_name)
+        [[ -z "$SERVER_NAME" ]] || fail 'helper.config_duplicate' 'The helper configuration repeats a key.'
+        SERVER_NAME="$value"
+        ;;
+      nginx_mode)
+        [[ -z "$NGINX_MODE" ]] || fail 'helper.config_duplicate' 'The helper configuration repeats a key.'
+        NGINX_MODE="$value"
+        ;;
+      nginx_container)
+        [[ -z "$NGINX_CONTAINER" ]] || fail 'helper.config_duplicate' 'The helper configuration repeats a key.'
+        NGINX_CONTAINER="$value"
+        ;;
+      *) fail 'helper.config_key' 'The helper configuration contains an unknown key.' ;;
+    esac
+  done < "$CONFIG_PATH"
+
+  [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] ||
+    fail 'helper.config_user' 'The configured SSH user is invalid.'
+  id "$SSH_USER" >/dev/null 2>&1 ||
+    fail 'helper.config_user_missing' 'The configured SSH user does not exist.'
+  [[ "$(id -u "$SSH_USER")" != '0' ]] ||
+    fail 'helper.config_user_root' 'The configured SSH user cannot be root.'
+  validate_absolute_path "$INCOMING_ROOT" ||
+    fail 'helper.config_incoming' 'The configured incoming root is invalid.'
+  (( ${#INCOMING_ROOT} + 37 <= 1024 )) ||
+    fail 'helper.config_incoming' 'The configured incoming root is too long for a transaction path.'
+  validate_absolute_path "$RELEASE_ROOT" ||
+    fail 'helper.config_release' 'The configured release root is invalid.'
+  validate_absolute_path "$BOOTSTRAP_TARGET" ||
+    fail 'helper.config_bootstrap' 'The configured bootstrap target is invalid.'
+  validate_dns_name "$SERVER_NAME" ||
+    fail 'helper.config_server_name' 'The configured server name is not a canonical DNS name.'
+  [[ "$NGINX_MODE" == 'host' || "$NGINX_MODE" == 'docker' ]] ||
+    fail 'helper.config_nginx_mode' 'The configured Nginx mode is invalid.'
+  if [[ "$NGINX_MODE" == 'docker' ]]; then
+    [[ "$NGINX_CONTAINER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] ||
+      fail 'helper.config_container' 'The configured Nginx container name is invalid.'
+  else
+    [[ "$NGINX_CONTAINER" == '-' ]] ||
+      fail 'helper.config_container' 'Host Nginx mode must use a dash for the container value.'
+  fi
+
+  if path_is_within "$INCOMING_ROOT" "$RELEASE_ROOT" ||
+    path_is_within "$RELEASE_ROOT" "$INCOMING_ROOT"; then
+    fail 'helper.config_overlap' 'Incoming and release roots cannot overlap.'
+  fi
+  if path_is_within "$BOOTSTRAP_TARGET" "$INCOMING_ROOT" ||
+    path_is_within "$BOOTSTRAP_TARGET" "$RELEASE_ROOT" ||
+    path_is_within "$INCOMING_ROOT" "$BOOTSTRAP_TARGET" ||
+    path_is_within "$RELEASE_ROOT" "$BOOTSTRAP_TARGET"; then
+    fail 'helper.config_bootstrap_overlap' 'The bootstrap target and helper-managed roots cannot overlap.'
+  fi
+}
+
+is_transaction_id() {
+  [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
+}
+
+validate_transaction_id() {
+  is_transaction_id "$1" ||
+    fail 'helper.transaction_id' 'The transaction ID is not a canonical lower-case UUID.'
+}
+
+ensure_lock() {
+  [[ ! -L "$LOCK_DIR" ]] || fail 'helper.lock_directory' 'The helper lock directory cannot be a symbolic link.'
+  validate_secure_creation_parent "$LOCK_DIR" ||
+    fail 'helper.lock_directory' 'The helper lock directory has unsafe ancestry.'
+  install -d -o root -g root -m 0700 -- "$LOCK_DIR" ||
+    fail 'helper.lock_directory' 'The helper lock directory could not be created.'
+  validate_secure_ancestry "$LOCK_DIR" ||
+    fail 'helper.lock_directory' 'The helper lock directory has unsafe ownership, permissions, or ancestry.'
+  [[ ! -e "$LOCK_PATH" || ( -f "$LOCK_PATH" && ! -L "$LOCK_PATH" ) ]] ||
+    fail 'helper.lock_file' 'The helper lock path is not a regular file.'
+  exec 9>"$LOCK_PATH" || fail 'helper.lock_file' 'The helper lock file could not be opened.'
+  chown root:root -- "$LOCK_PATH"
+  chmod 0600 -- "$LOCK_PATH"
+  flock -x -w 30 9 || fail 'helper.busy' 'Another helper operation did not release the lock in time.'
+}
+
+ensure_roots() {
+  [[ ! -L "$INCOMING_ROOT" && ! -L "$RELEASE_ROOT" ]] ||
+    fail 'helper.root_symlink' 'A helper root cannot be a symbolic link.'
+  validate_secure_creation_parent "$INCOMING_ROOT" ||
+    fail 'helper.incoming_ancestry' 'The incoming root has unsafe creation ancestry.'
+  validate_secure_creation_parent "$RELEASE_ROOT" ||
+    fail 'helper.release_ancestry' 'The release root has unsafe creation ancestry.'
+  install -d -o root -g root -m 0711 -- "$INCOMING_ROOT"
+  install -d -o root -g root -m 0700 -- "$RELEASE_ROOT"
+  install -d -o root -g root -m 0700 -- "$RELEASE_ROOT/.state"
+  validate_secure_ancestry "$INCOMING_ROOT" ||
+    fail 'helper.incoming_ancestry' 'The incoming root has unsafe ownership, permissions, or ancestry.'
+  validate_secure_ancestry "$RELEASE_ROOT" ||
+    fail 'helper.release_ancestry' 'The release root has unsafe ownership, permissions, or ancestry.'
+  validate_secure_ancestry "$RELEASE_ROOT/.state" ||
+    fail 'helper.state_ancestry' 'The state directory has unsafe ownership, permissions, or ancestry.'
+  validate_secure_ancestry "$BOOTSTRAP_TARGET" ||
+    fail 'helper.bootstrap_ancestry' 'The bootstrap target has unsafe ownership, permissions, or ancestry.'
+}
+
+incoming_path() {
+  printf '%s/%s' "$INCOMING_ROOT" "$1"
+}
+
+release_path() {
+  printf '%s/%s' "$RELEASE_ROOT" "$1"
+}
+
+state_path() {
+  printf '%s/.state/%s.state' "$RELEASE_ROOT" "$1"
+}
+
+active_link() {
+  printf '%s/current' "$RELEASE_ROOT"
+}
+
+is_approved_target_path() {
+  local target="$1"
+  local suffix
+  [[ "$target" == "$BOOTSTRAP_TARGET" ]] && return 0
+  [[ "$target" == "$RELEASE_ROOT/"* ]] || return 1
+  suffix="${target:${#RELEASE_ROOT}+1}"
+  [[ "$suffix" != */* ]] || return 1
+  is_transaction_id "$suffix"
+}
+
+validate_previous_target() {
+  local target="$1"
+  is_approved_target_path "$target" || return 1
+  [[ -d "$target" && ! -L "$target" ]]
+}
+
+validate_state_values() {
+  local status="$1"
+  local previous="$2"
+  case "$status" in
+    prepared | validated)
+      [[ -z "$previous" ]]
+      ;;
+    activating | active | rolling-back | rolled-back | committed)
+      [[ -n "$previous" ]] && is_approved_target_path "$previous"
+      ;;
+    aborted)
+      [[ -z "$previous" ]] || is_approved_target_path "$previous"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+write_state() {
+  local transaction_id="$1"
+  local status="$2"
+  local previous="${3:-}"
+  local destination temporary
+  validate_state_values "$status" "$previous" ||
+    fail 'helper.state_write' 'The helper refused to write invalid transaction state.'
+  destination="$(state_path "$transaction_id")"
+  temporary="$(mktemp -- "$destination.tmp.XXXXXX")" ||
+    fail 'helper.state_write' 'A temporary state file could not be created.'
+  CLEANUP_PATH="$temporary"
+  {
+    printf 'status=%s\n' "$status"
+    printf 'previous=%s\n' "$previous"
+  } > "$temporary"
+  chmod 0600 -- "$temporary"
+  chown root:root -- "$temporary"
+  mv -fT -- "$temporary" "$destination"
+  CLEANUP_PATH=''
+}
+
+read_state() {
+  local transaction_id="$1"
+  local source key value owner mode size
+  local seen_status='false'
+  local seen_previous='false'
+  source="$(state_path "$transaction_id")"
+  [[ -f "$source" && ! -L "$source" ]] ||
+    fail 'helper.state_missing' 'The transaction state is missing.'
+  owner="$(stat -c '%u' -- "$source")"
+  mode="$(stat -c '%a' -- "$source")"
+  size="$(stat -c '%s' -- "$source")"
+  [[ "$owner" == '0' && $((8#$mode & 8#077)) == 0 && "$size" -le 2048 ]] ||
+    fail 'helper.state_metadata' 'Transaction state has unsafe metadata.'
+
+  STATE_STATUS=''
+  STATE_PREVIOUS=''
+  while IFS='=' read -r key value || [[ -n "$key" ]]; do
+    case "$key" in
+      status)
+        [[ "$seen_status" == 'false' ]] || fail 'helper.state_invalid' 'Transaction state repeats status.'
+        seen_status='true'
+        STATE_STATUS="$value"
+        ;;
+      previous)
+        [[ "$seen_previous" == 'false' ]] || fail 'helper.state_invalid' 'Transaction state repeats previous.'
+        seen_previous='true'
+        STATE_PREVIOUS="$value"
+        ;;
+      *) fail 'helper.state_invalid' 'Transaction state contains an unknown key.' ;;
+    esac
+  done < "$source"
+  [[ "$seen_status" == 'true' && "$seen_previous" == 'true' ]] ||
+    fail 'helper.state_invalid' 'Transaction state is incomplete.'
+  validate_state_values "$STATE_STATUS" "$STATE_PREVIOUS" ||
+    fail 'helper.state_invalid' 'Transaction state has invalid values.'
+}
+
+run_nginx_test() {
+  if [[ "$NGINX_MODE" == 'docker' ]]; then
+    timeout --kill-after=5s 30s docker exec "$NGINX_CONTAINER" nginx -t >/dev/null 2>&1
+  else
+    timeout --kill-after=5s 30s nginx -t -q >/dev/null 2>&1
+  fi
+}
+
+run_nginx_reload() {
+  if [[ "$NGINX_MODE" == 'docker' ]]; then
+    timeout --kill-after=5s 30s docker exec "$NGINX_CONTAINER" nginx -s reload >/dev/null 2>&1
+  else
+    timeout --kill-after=5s 30s systemctl reload nginx >/dev/null 2>&1
+  fi
+}
+
+validate_prepared_directory() {
+  local transaction_id="$1"
+  local incoming owner mode expected_uid ssh_group
+  incoming="$(incoming_path "$transaction_id")"
+  expected_uid="$(id -u "$SSH_USER")"
+  ssh_group="$(id -gn "$SSH_USER")"
+  if [[ ! -e "$incoming" && ! -L "$incoming" ]]; then
+    install -d -o "$SSH_USER" -g "$ssh_group" -m 0700 -- "$incoming"
+  fi
+  [[ -d "$incoming" && ! -L "$incoming" ]] ||
+    fail 'helper.incoming_directory' 'The incoming transaction path is not a directory.'
+  owner="$(stat -c '%u' -- "$incoming")"
+  [[ "$owner" == "$expected_uid" || "$owner" == '0' ]] ||
+    fail 'helper.incoming_directory_owner' 'The incoming transaction directory has the wrong owner.'
+  chmod 0700 -- "$incoming"
+  mode="$(stat -c '%a' -- "$incoming")"
+  [[ "$mode" == '700' ]] ||
+    fail 'helper.incoming_directory_mode' 'The incoming transaction directory has unsafe permissions.'
+}
+
+freeze_incoming_directory() {
+  local transaction_id="$1"
+  local incoming expected_uid entry basename entry_count owner links size
+  incoming="$(incoming_path "$transaction_id")"
+  expected_uid="$(id -u "$SSH_USER")"
+  validate_prepared_directory "$transaction_id"
+
+  chown root:root -- "$incoming"
+  chmod 0700 -- "$incoming"
+
+  entry_count=0
+  while IFS= read -r -d '' entry; do
+    basename="${entry##*/}"
+    case "$basename" in
+      fullchain.pem | privkey.pem) ;;
+      *) fail 'helper.incoming_contents' 'The incoming transaction contains an unexpected entry.' ;;
+    esac
+    ((entry_count += 1))
+  done < <(find "$incoming" -mindepth 1 -maxdepth 1 -print0)
+  [[ "$entry_count" == '2' ]] ||
+    fail 'helper.incoming_contents' 'The incoming transaction must contain exactly two files.'
+
+  for basename in fullchain.pem privkey.pem; do
+    entry="$incoming/$basename"
+    [[ -f "$entry" && ! -L "$entry" ]] ||
+      fail 'helper.incoming_file' 'A required incoming file is missing or not regular.'
+    owner="$(stat -c '%u' -- "$entry")"
+    [[ "$owner" == "$expected_uid" || "$owner" == '0' ]] ||
+      fail 'helper.incoming_owner' 'An incoming file has the wrong owner.'
+    chown -h root:root -- "$entry"
+    [[ -f "$entry" && ! -L "$entry" ]] ||
+      fail 'helper.incoming_file' 'A required incoming file changed type while it was frozen.'
+    links="$(stat -c '%h' -- "$entry")"
+    [[ "$links" == '1' ]] || fail 'helper.incoming_links' 'An incoming file has multiple hard links.'
+    size="$(stat -c '%s' -- "$entry")"
+    if [[ "$basename" == 'fullchain.pem' ]]; then
+      (( size > 0 && size <= 1048576 )) ||
+        fail 'helper.incoming_size' 'The certificate chain is empty or exceeds its size limit.'
+      chmod 0644 -- "$entry"
+    else
+      (( size > 0 && size <= 131072 )) ||
+        fail 'helper.incoming_size' 'The private key is empty or exceeds its size limit.'
+      chmod 0600 -- "$entry"
+    fi
+  done
+}
+
+validate_release_file() {
+  local path="$1"
+  local maximum_bytes="$2"
+  local private_file="$3"
+  local owner mode links size
+  [[ -f "$path" && ! -L "$path" ]] || return 1
+  owner="$(stat -c '%u' -- "$path")"
+  mode="$(stat -c '%a' -- "$path")"
+  links="$(stat -c '%h' -- "$path")"
+  size="$(stat -c '%s' -- "$path")"
+  [[ "$owner" == '0' && "$links" == '1' ]] || return 1
+  (( size > 0 && size <= maximum_bytes )) || return 1
+  if [[ "$private_file" == 'true' ]]; then
+    (( (8#$mode & 8#077) == 0 )) || return 1
+  else
+    (( (8#$mode & 8#022) == 0 )) || return 1
+  fi
+}
+
+validate_release_tree() {
+  local directory="$1"
+  local owner mode
+  [[ -d "$directory" && ! -L "$directory" ]] || return 1
+  owner="$(stat -c '%u' -- "$directory")"
+  mode="$(stat -c '%a' -- "$directory")"
+  [[ "$owner" == '0' && $((8#$mode & 8#077)) == 0 ]] || return 1
+  validate_release_file "$directory/fullchain.pem" 1048576 'false' || return 1
+  validate_release_file "$directory/privkey.pem" 131072 'true'
+}
+
+validate_release_material() {
+  local directory="$1"
+  local certificate="$directory/fullchain.pem"
+  local private_key="$directory/privkey.pem"
+  local not_before not_before_epoch now_epoch certificate_key_hash private_key_hash
+  validate_release_tree "$directory" ||
+    fail 'helper.release_metadata' 'The staged certificate generation has unsafe metadata.'
+  openssl x509 -in "$certificate" -noout >/dev/null 2>&1 ||
+    fail 'helper.certificate_parse' 'The staged certificate cannot be parsed.'
+  openssl pkey -in "$private_key" -passin pass: -noout >/dev/null 2>&1 ||
+    fail 'helper.private_key_parse' 'The staged private key is encrypted, interactive, or invalid.'
+  openssl x509 -in "$certificate" -checkhost "$SERVER_NAME" -noout >/dev/null 2>&1 ||
+    fail 'helper.certificate_name' 'The staged certificate does not contain the configured server name.'
+  openssl x509 -in "$certificate" -checkend 0 -noout >/dev/null 2>&1 ||
+    fail 'helper.certificate_expired' 'The staged certificate is expired.'
+  not_before="$(openssl x509 -in "$certificate" -noout -startdate | sed -n 's/^notBefore=//p')" ||
+    fail 'helper.certificate_start' 'The staged certificate start date cannot be read.'
+  [[ -n "$not_before" ]] || fail 'helper.certificate_start' 'The staged certificate start date is missing.'
+  not_before_epoch="$(date -u -d "$not_before" '+%s')" ||
+    fail 'helper.certificate_start' 'The staged certificate start date cannot be parsed.'
+  now_epoch="$(date -u '+%s')"
+  (( not_before_epoch <= now_epoch )) ||
+    fail 'helper.certificate_not_yet_valid' 'The staged certificate is not valid yet.'
+
+  certificate_key_hash="$({
+    openssl x509 -in "$certificate" -pubkey -noout |
+      openssl pkey -pubin -outform DER 2>/dev/null |
+      sha256sum
+  } | awk '{print $1}')" || fail 'helper.key_hash' 'The certificate public key cannot be hashed.'
+  private_key_hash="$({
+    openssl pkey -in "$private_key" -passin pass: -pubout -outform DER 2>/dev/null |
+      sha256sum
+  } | awk '{print $1}')" || fail 'helper.key_hash' 'The private key public key cannot be hashed.'
+  [[ -n "$certificate_key_hash" && "$certificate_key_hash" == "$private_key_hash" ]] ||
+    fail 'helper.key_mismatch' 'The staged certificate and private key do not match.'
+}
+
+remove_stale_release_temporary() {
+  local transaction_id="$1"
+  local temporary="$RELEASE_ROOT/.release-$transaction_id.tmp"
+  [[ ! -e "$temporary" && ! -L "$temporary" ]] && return 0
+  if [[ -L "$temporary" ]]; then
+    rm -f -- "$temporary"
+    return 0
+  fi
+  [[ -d "$temporary" && "$(stat -c '%u' -- "$temporary")" == '0' ]] ||
+    fail 'helper.temporary_path' 'A stale release temporary path is unsafe.'
+  rm -rf -- "$temporary"
+}
+
+stage_release() {
+  local transaction_id="$1"
+  local incoming release temporary
+  incoming="$(incoming_path "$transaction_id")"
+  release="$(release_path "$transaction_id")"
+  if [[ -e "$release" || -L "$release" ]]; then
+    validate_release_material "$release"
+    return 0
+  fi
+
+  freeze_incoming_directory "$transaction_id"
+  remove_stale_release_temporary "$transaction_id"
+  temporary="$RELEASE_ROOT/.release-$transaction_id.tmp"
+  install -d -o root -g root -m 0700 -- "$temporary"
+  CLEANUP_PATH="$temporary"
+  install -o root -g root -m 0644 -- "$incoming/fullchain.pem" "$temporary/fullchain.pem"
+  install -o root -g root -m 0600 -- "$incoming/privkey.pem" "$temporary/privkey.pem"
+  cmp -s -- "$incoming/fullchain.pem" "$temporary/fullchain.pem" &&
+    cmp -s -- "$incoming/privkey.pem" "$temporary/privkey.pem" ||
+    fail 'helper.incoming_changed' 'Incoming certificate material changed while it was copied.'
+  validate_release_material "$temporary"
+  mv -T -- "$temporary" "$release"
+  CLEANUP_PATH=''
+}
+
+remove_stale_current_temporary() {
+  local transaction_id="$1"
+  local temporary="$RELEASE_ROOT/.current-$transaction_id.tmp"
+  [[ ! -e "$temporary" && ! -L "$temporary" ]] && return 0
+  [[ -L "$temporary" ]] || return 1
+  rm -f -- "$temporary"
+}
+
+switch_active_target() {
+  local target="$1"
+  local transaction_id="$2"
+  local temporary="$RELEASE_ROOT/.current-$transaction_id.tmp"
+  validate_previous_target "$target" || return 1
+  remove_stale_current_temporary "$transaction_id" || return 1
+  CLEANUP_PATH="$temporary"
+  if ! ln -s -- "$target" "$temporary"; then
+    CLEANUP_PATH=''
+    return 1
+  fi
+  if ! mv -fT -- "$temporary" "$(active_link)"; then
+    rm -f -- "$temporary" >/dev/null 2>&1 || true
+    CLEANUP_PATH=''
+    return 1
+  fi
+  CLEANUP_PATH=''
+}
+
+read_current_target() {
+  local current
+  current="$(active_link)"
+  [[ -L "$current" ]] || return 1
+  readlink -- "$current"
+}
+
+remove_incoming_transaction() {
+  local transaction_id="$1"
+  local incoming
+  incoming="$(incoming_path "$transaction_id")"
+  [[ ! -e "$incoming" && ! -L "$incoming" ]] && return 0
+  [[ -d "$incoming" && ! -L "$incoming" ]] ||
+    fail 'helper.incoming_cleanup' 'The incoming transaction path cannot be cleaned safely.'
+  find "$incoming" -xdev -depth -mindepth 1 -delete ||
+    fail 'helper.incoming_cleanup' 'The incoming transaction path could not be cleaned.'
+  rmdir -- "$incoming" ||
+    fail 'helper.incoming_cleanup' 'The incoming transaction path could not be cleaned.'
+}
+
+remove_release_generation() {
+  local transaction_id="$1"
+  local release
+  release="$(release_path "$transaction_id")"
+  [[ ! -e "$release" && ! -L "$release" ]] && return 0
+  [[ -d "$release" && ! -L "$release" && "$(stat -c '%u' -- "$release")" == '0' ]] ||
+    fail 'helper.release_cleanup' 'The release generation cannot be cleaned safely.'
+  find "$release" -xdev -depth -mindepth 1 -delete
+  rmdir -- "$release"
+}
+
+emit_success() {
+  local code="$1"
+  local transaction_id="$2"
+  printf '{"version":1,"success":true,"code":"%s","transactionId":"%s"}\n' \
+    "$code" "$transaction_id"
+}
+
+emit_prepare_success() {
+  local transaction_id="$1"
+  local upload_path
+  upload_path="$(incoming_path "$transaction_id")"
+  # validate_absolute_path's ASCII allowlist excludes every byte that requires
+  # JSON string escaping, so this exact canonical path is safe to interpolate.
+  validate_absolute_path "$upload_path" ||
+    fail 'helper.response_path' 'The prepared upload path is invalid.'
+  printf '{"version":1,"success":true,"code":"helper.prepared","transactionId":"%s","uploadPath":"%s"}\n' \
+    "$transaction_id" "$upload_path"
+}
+
+do_prepare() {
+  local transaction_id="$1"
+  local state incoming release
+  state="$(state_path "$transaction_id")"
+  incoming="$(incoming_path "$transaction_id")"
+  release="$(release_path "$transaction_id")"
+  if [[ -e "$state" || -L "$state" ]]; then
+    read_state "$transaction_id"
+    [[ "$STATE_STATUS" == 'prepared' ]] ||
+      fail 'helper.state_transition' 'Only a prepared transaction can be prepared again.'
+    validate_prepared_directory "$transaction_id"
+    emit_prepare_success "$transaction_id"
+    return 0
+  fi
+  [[ ! -e "$incoming" && ! -L "$incoming" && ! -e "$release" && ! -L "$release" ]] ||
+    fail 'helper.transaction_exists' 'Transaction paths already exist without valid state.'
+  write_state "$transaction_id" 'prepared'
+  validate_prepared_directory "$transaction_id"
+  emit_prepare_success "$transaction_id"
+}
+
+do_validate() {
+  local transaction_id="$1"
+  read_state "$transaction_id"
+  [[ "$STATE_STATUS" == 'prepared' || "$STATE_STATUS" == 'validated' ]] ||
+    fail 'helper.state_transition' 'Only a prepared or validated transaction can be validated.'
+  stage_release "$transaction_id"
+  run_nginx_test || fail 'helper.nginx_test' 'Nginx rejected its current configuration.'
+  [[ "$STATE_STATUS" == 'validated' ]] || write_state "$transaction_id" 'validated'
+  emit_success 'helper.validated' "$transaction_id"
+}
+
+do_activate() {
+  local transaction_id="$1"
+  local release previous current_target restored
+  read_state "$transaction_id"
+  release="$(release_path "$transaction_id")"
+  validate_release_material "$release"
+
+  if [[ "$STATE_STATUS" == 'active' ]]; then
+    current_target="$(read_current_target)" || fail 'helper.current_missing' 'The active certificate pointer is missing.'
+    [[ "$current_target" == "$release" ]] || fail 'helper.not_active' 'The transaction state and active pointer disagree.'
+    emit_success 'helper.activated' "$transaction_id"
+    return 0
+  fi
+
+  if [[ "$STATE_STATUS" == 'validated' ]]; then
+    current_target="$(read_current_target)" || fail 'helper.current_missing' 'The active certificate pointer is missing.'
+    [[ "$current_target" != "$release" ]] ||
+      fail 'helper.activation_ambiguous' 'The new generation is active without a recorded rollback target.'
+    validate_previous_target "$current_target" ||
+      fail 'helper.current_target' 'The active certificate pointer has an unapproved target.'
+    previous="$current_target"
+    write_state "$transaction_id" 'activating' "$previous"
+  elif [[ "$STATE_STATUS" == 'activating' ]]; then
+    previous="$STATE_PREVIOUS"
+    validate_previous_target "$previous" ||
+      fail 'helper.previous_target' 'The recorded rollback target is invalid.'
+  else
+    fail 'helper.state_transition' 'Only a validated or activating transaction can be activated.'
+  fi
+
+  current_target="$(read_current_target)" || fail 'helper.current_missing' 'The active certificate pointer is missing.'
+  if [[ "$current_target" == "$previous" ]]; then
+    switch_active_target "$release" "$transaction_id" ||
+      fail 'helper.activation_switch' 'The active certificate pointer could not be changed.'
+  elif [[ "$current_target" != "$release" ]]; then
+    fail 'helper.activation_ambiguous' 'The active certificate pointer changed during activation.'
+  fi
+
+  if ! run_nginx_test || ! run_nginx_reload; then
+    restored='false'
+    if switch_active_target "$previous" "$transaction_id" &&
+      run_nginx_test && run_nginx_reload; then
+      restored='true'
+      write_state "$transaction_id" 'validated'
+    fi
+    if [[ "$restored" == 'true' ]]; then
+      fail 'helper.activation_failed' 'Activation failed and the previous pointer was restored.'
+    fi
+    fail 'helper.activation_recovery_failed' 'Activation failed and automatic restoration could not be verified.'
+  fi
+  write_state "$transaction_id" 'active' "$previous"
+  emit_success 'helper.activated' "$transaction_id"
+}
+
+do_verify() {
+  local transaction_id="$1"
+  local release target fingerprint not_after
+  read_state "$transaction_id"
+  [[ "$STATE_STATUS" == 'active' || "$STATE_STATUS" == 'committed' ]] ||
+    fail 'helper.state_transition' 'Only an active or committed transaction can be verified.'
+  release="$(release_path "$transaction_id")"
+  target="$(read_current_target)" || fail 'helper.current_missing' 'The active certificate pointer is missing.'
+  [[ "$target" == "$release" ]] || fail 'helper.not_active' 'The transaction is not the active generation.'
+  validate_release_material "$release"
+  fingerprint="$(openssl x509 -in "$release/fullchain.pem" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':')" ||
+    fail 'helper.certificate_fingerprint' 'The certificate fingerprint could not be read.'
+  not_after="$(openssl x509 -in "$release/fullchain.pem" -noout -enddate | cut -d= -f2-)" ||
+    fail 'helper.certificate_end' 'The certificate end date could not be read.'
+  printf '{"version":1,"success":true,"code":"helper.verified","transactionId":"%s","leafSha256":"%s","notAfter":"%s"}\n' \
+    "$transaction_id" "$fingerprint" "$not_after"
+}
+
+do_rollback() {
+  local transaction_id="$1"
+  local release previous current_target
+  read_state "$transaction_id"
+  release="$(release_path "$transaction_id")"
+
+  if [[ "$STATE_STATUS" == 'rolled-back' ]]; then
+    previous="$STATE_PREVIOUS"
+    current_target="$(read_current_target)" || fail 'helper.current_missing' 'The active certificate pointer is missing.'
+    [[ "$current_target" == "$previous" ]] || fail 'helper.rollback_ambiguous' 'The rollback state and active pointer disagree.'
+    emit_success 'helper.rolled_back' "$transaction_id"
+    return 0
+  fi
+
+  case "$STATE_STATUS" in
+    active | activating)
+      previous="$STATE_PREVIOUS"
+      validate_previous_target "$previous" ||
+        fail 'helper.previous_target' 'The recorded rollback target is invalid.'
+      current_target="$(read_current_target)" || fail 'helper.current_missing' 'The active certificate pointer is missing.'
+      [[ "$current_target" == "$release" || "$current_target" == "$previous" ]] ||
+        fail 'helper.rollback_ambiguous' 'The active certificate pointer has an unexpected target.'
+      write_state "$transaction_id" 'rolling-back' "$previous"
+      ;;
+    rolling-back)
+      previous="$STATE_PREVIOUS"
+      validate_previous_target "$previous" ||
+        fail 'helper.previous_target' 'The recorded rollback target is invalid.'
+      ;;
+    *) fail 'helper.state_transition' 'Only an active, activating, or rolling-back transaction can be rolled back.' ;;
+  esac
+
+  current_target="$(read_current_target)" || fail 'helper.current_missing' 'The active certificate pointer is missing.'
+  if [[ "$current_target" == "$release" ]]; then
+    switch_active_target "$previous" "$transaction_id" ||
+      fail 'helper.rollback_switch' 'The rollback pointer could not be installed.'
+  elif [[ "$current_target" != "$previous" ]]; then
+    fail 'helper.rollback_ambiguous' 'The active certificate pointer changed during rollback.'
+  fi
+  run_nginx_test || fail 'helper.rollback_test' 'Nginx rejected the restored configuration.'
+  run_nginx_reload || fail 'helper.rollback_reload' 'Nginx could not reload the restored configuration.'
+  write_state "$transaction_id" 'rolled-back' "$previous"
+  emit_success 'helper.rolled_back' "$transaction_id"
+}
+
+do_commit() {
+  local transaction_id="$1"
+  local release target
+  read_state "$transaction_id"
+  if [[ "$STATE_STATUS" == 'committed' ]]; then
+    remove_incoming_transaction "$transaction_id"
+    emit_success 'helper.committed' "$transaction_id"
+    return 0
+  fi
+  [[ "$STATE_STATUS" == 'active' ]] ||
+    fail 'helper.state_transition' 'Only an active transaction can be committed.'
+  release="$(release_path "$transaction_id")"
+  target="$(read_current_target)" || fail 'helper.current_missing' 'The active certificate pointer is missing.'
+  [[ "$target" == "$release" ]] || fail 'helper.not_active' 'The transaction is not the active generation.'
+  # Keep `active` as the durable recovery state until uploaded key material is
+  # gone. `committed` is the postcondition marker, never a cleanup intention.
+  remove_incoming_transaction "$transaction_id"
+  write_state "$transaction_id" 'committed' "$STATE_PREVIOUS"
+  emit_success 'helper.committed' "$transaction_id"
+}
+
+do_abort() {
+  local transaction_id="$1"
+  local release current_target previous
+  read_state "$transaction_id"
+  previous="$STATE_PREVIOUS"
+  case "$STATE_STATUS" in
+    active | activating | rolling-back | committed)
+      fail 'helper.state_transition' 'An active, transitional, or committed transaction cannot be aborted.'
+      ;;
+    prepared | validated | rolled-back | aborted) ;;
+    *) fail 'helper.state_transition' 'The transaction cannot be aborted from its current state.' ;;
+  esac
+
+  release="$(release_path "$transaction_id")"
+  if current_target="$(read_current_target 2>/dev/null)"; then
+    [[ "$current_target" != "$release" ]] ||
+      fail 'helper.not_abortable' 'The transaction is active and cannot be aborted.'
+  fi
+  remove_incoming_transaction "$transaction_id"
+  remove_stale_release_temporary "$transaction_id"
+  remove_stale_current_temporary "$transaction_id" ||
+    fail 'helper.temporary_path' 'A stale pointer temporary path is unsafe.'
+  remove_release_generation "$transaction_id"
+  [[ "$STATE_STATUS" == 'aborted' ]] || write_state "$transaction_id" 'aborted' "$previous"
+  emit_success 'helper.aborted' "$transaction_id"
+}
+
+do_status() {
+  local transaction_id="$1"
+  local active='false'
+  local recovery_required='false'
+  local target
+  read_state "$transaction_id"
+  if target="$(read_current_target 2>/dev/null)" && [[ "$target" == "$(release_path "$transaction_id")" ]]; then
+    active='true'
+  fi
+  [[ "$STATE_STATUS" == 'activating' || "$STATE_STATUS" == 'rolling-back' ]] && recovery_required='true'
+  printf '{"version":1,"success":true,"code":"helper.status","transactionId":"%s","status":"%s","active":%s,"recoveryRequired":%s}\n' \
+    "$transaction_id" "$STATE_STATUS" "$active" "$recovery_required"
+}
+
+main() {
+  [[ "$#" == 2 ]] || fail 'helper.arguments' 'Expected a verb and transaction ID.'
+  local verb="$1"
+  local transaction_id="$2"
+  case "$verb" in
+    prepare | validate | activate | verify | rollback | commit | abort | status) ;;
+    *) fail 'helper.verb' 'The helper verb is not supported.' ;;
+  esac
+
+  validate_transaction_id "$transaction_id"
+  require_root
+  ensure_lock
+  load_config
+  ensure_roots
+
+  case "$verb" in
+    prepare) do_prepare "$transaction_id" ;;
+    validate) do_validate "$transaction_id" ;;
+    activate) do_activate "$transaction_id" ;;
+    verify) do_verify "$transaction_id" ;;
+    rollback) do_rollback "$transaction_id" ;;
+    commit) do_commit "$transaction_id" ;;
+    abort) do_abort "$transaction_id" ;;
+    status) do_status "$transaction_id" ;;
+  esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

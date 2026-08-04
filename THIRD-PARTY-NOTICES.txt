@@ -13,6 +13,18 @@ metadata declares the MIT license:
   Project: https://github.com/dotnet/efcore
 - MSTest 4.3.3
   Project: https://github.com/microsoft/testfx
+- SSH.NET 2025.1.0
+  Project: https://github.com/sshnet/SSH.NET
+- Webprofusion.Certify.ACME.Anvil 3.3.3
+  Project: https://github.com/webprofusion/anvil
+
+The ACME and SSH packages above resolve these MIT-licensed transitive
+dependencies:
+
+- BouncyCastle.Cryptography 2.6.2
+  Project: https://github.com/bcgit/bc-csharp
+- Newtonsoft.Json 13.0.3
+  Project: https://github.com/JamesNK/Newtonsoft.Json
 
 This source tree also directly references:
 
