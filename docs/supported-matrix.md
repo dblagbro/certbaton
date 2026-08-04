@@ -10,6 +10,8 @@ Legend:
   not a compatibility or production-support claim.
 - **Qualification pending** — required real integration or clean-machine
   evidence has not passed.
+- **One-run staging evidence** — one manually authorized end-to-end staging
+  run passed; this is evidence, not a compatibility or support claim.
 - **P0 target** — intended to be implemented and qualified before the first
   supported public preview.
 - **Evaluate later** — useful, but no release commitment.
@@ -26,7 +28,7 @@ Legend:
 | Architecture | Windows on ARM64 | Evaluate later | No P0 artifact or emulation promise |
 | Operating system | Linux or macOS | Not P0 | Shared libraries do not imply a supported client |
 | UI | WPF desktop | Pre-alpha source | Live target/evidence view is the default; enrollment remains CLI-only; simulator is secondary |
-| Background execution | Windows Service | Pre-alpha source; qualification pending | Owns live operations, a basic due-target scan, and durable recovery state; production retry/alert policy is incomplete |
+| Background execution | Windows Service | Pre-alpha source; one-run staging evidence | Owns live operations, a basic due-target scan, and durable recovery state; a completed live operation survived a Service stop/start, but production retry/alert policy is incomplete |
 | Secret vault | DPAPI-NG `LOCAL=user` under virtual Service account | Pre-alpha source; qualification pending | Installed logoff/reboot, repair, upgrade, backup/restore, rotation, and uninstall lifecycle remains gated |
 | Address-book import | WinSCP non-secret metadata | P0 target; not implemented | Opt-in preview required; never silently imports or decrypts stored passwords |
 | Address-book import | Other applications | Evaluate later | One reviewed importer at a time |
@@ -35,10 +37,10 @@ Legend:
 
 | Area | Method | Status | Notes |
 | --- | --- | --- | --- |
-| ACME protocol | ACME v2 through embedded Anvil adapter | Pre-alpha source; qualification pending | Adapter and fake-workflow tests exist; Pebble and public staging interoperability are pending |
-| Certificate authority | Let's Encrypt staging | Qualification pending | Exact staging directory is built in; no end-to-end public staging evidence yet |
+| ACME protocol | ACME v2 through embedded Anvil adapter | Pre-alpha source; one-run staging evidence | Adapter and fake-workflow tests exist; one public Let's Encrypt staging order passed; broader protocol and failure qualification is pending |
+| Certificate authority | Let's Encrypt staging | One-run staging evidence | One end-to-end public staging order passed on 2026-08-04; no support claim |
 | Certificate authority | Let's Encrypt production | Not supported | Exact production directory requires explicit enrollment, but production use remains gated |
-| Domain validation | HTTP-01 | Pre-alpha source; qualification pending | Exact-content public pre-validation exists; requires public port 80 and compatible document-root access |
+| Domain validation | HTTP-01 | Pre-alpha source; one-run staging evidence | Exact-content public pre-validation and CA validation passed once; requires public port 80 and compatible document-root access |
 | Domain validation | DNS-01 | Not P0 | No wildcard certificates in P0 |
 | Domain validation | TLS-ALPN-01 | Not P0 | Not part of the first connector model |
 | Certificate key algorithm | ECDSA P-256 | Pre-alpha source | Current live coordinator generates this key and CSR; CA and hosting compatibility qualification is pending |
@@ -48,15 +50,15 @@ Legend:
 
 | Area | Platform or method | Status | Notes |
 | --- | --- | --- | --- |
-| Transport | SSH/SFTP through SSH.NET to an OpenSSH-compatible Linux host | Pre-alpha source; qualification pending | Exact host, port, algorithm, SHA-256 fingerprint, and raw-host-key pin required |
+| Transport | SSH/SFTP through SSH.NET to an OpenSSH-compatible Linux host | Pre-alpha source; one-run staging evidence | Exact-pinned transport passed once; exact host, port, algorithm, SHA-256 fingerprint, and raw-host-key pin are required |
 | Transport | SCP | Not P0 | SFTP is preferred for typed file operations |
 | Transport | FTP/FTPS | Not P0 | Different trust and credential model |
 | Transport | Hosting-provider API | Evaluate later | Requires a maintained, provider-specific connector |
-| Web server | Nginx fixed-helper layout | Pre-alpha fixture; qualification pending | Root-owned versioned helper, immutable generations, atomic `current` symlink, test/reload, commit, and rollback; exact layouts will be narrow |
+| Web server | Nginx fixed-helper layout | Pre-alpha fixture; one-run staging evidence | Root-owned versioned helper, immutable generations, atomic `current` symlink, test/reload, commit, and rollback passed once on an isolated Docker/Nginx target; exact layouts will be narrow |
 | Web server | Apache HTTP Server | Evaluate later | Requires a typed activation and rollback profile |
 | Web server | IIS | Evaluate later | Local Windows server management is a separate connector |
 | Activation | Arbitrary remote shell script | Not P0 | Typed, bounded connector operations only |
-| Verification | Independent public TLS handshake | Pre-alpha source; qualification pending | Local fake tests exist; deployment-channel success alone is insufficient |
+| Verification | Independent public TLS handshake | Pre-alpha source; one-run staging evidence | Exact staging leaf and all requested names were independently verified once; deployment-channel success alone remains insufficient |
 
 ## Hosting environment fit
 

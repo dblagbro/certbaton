@@ -1,8 +1,9 @@
 # ADR 0005: Use Anvil behind the CertBaton ACME boundary
 
-- Status: Accepted as pre-alpha candidate; public staging and production gates open
+- Status: Accepted as pre-alpha candidate; one public staging run passed;
+  production gate open
 - Date: 2026-07-29
-- Updated: 2026-07-31
+- Updated: 2026-08-04
 - Decision owners: CertBaton maintainers
 
 ## Context
@@ -52,10 +53,11 @@ certificate result handling. The complete HTTP-01 coordinator has local
 fake-workflow tests for success, cleanup, cancellation, verification failure,
 and rollback-required outcomes.
 
-This evidence uses test doubles. It does not prove interoperability with
-Pebble, Let's Encrypt staging, a public HTTP route, or a real Service restart.
-No production-readiness claim follows from the adapter or coordinator unit
-tests.
+On 2026-08-04, one manually authorized installed-Service run additionally
+proved account/order interoperability with Let's Encrypt staging, a public
+HTTP-01 route, issuance, cleanup, and durable success after a real Service
+restart. It did not exercise the remaining protocol failures below or establish
+production readiness.
 
 ## Open qualification gate
 
@@ -90,8 +92,8 @@ new review and repeat of the interoperability evidence.
 - P0 does not invoke a user-installed Certbot or parse its console output.
 - CertBaton accepts responsibility for testing, monitoring, and promptly
   updating the selected embedded implementation.
-- Package popularity is not support evidence. Public staging qualification,
-  restart/recovery tests, vault lifecycle tests, and the production approval
-  gate remain mandatory.
+- Package popularity is not support evidence. Repeatable staging
+  qualification, failure/recovery tests, vault lifecycle tests, and the
+  production approval gate remain mandatory.
 - A failed qualification may replace the adapter without changing the domain,
   IPC, vault, SSH, or deployment contracts.

@@ -10,8 +10,9 @@ run the repair flow before looking for the live UI or CLI methods.
 > **Do not use this build on a production website.** The source contains code
 > that can contact Let's Encrypt, write challenge and certificate files, invoke
 > the fixed remote Nginx helper, reload Nginx, and change the certificate served
-> by a public endpoint. The complete path has local fake-workflow coverage, but
-> real public staging qualification is still pending. Use only a disposable or
+> by a public endpoint. The complete path has local fake-workflow coverage and
+> one successful, manually authorized public staging run. This is not broad
+> qualification or a production-safety claim. Use only a disposable or
 > explicitly authorized target with a tested rollback package.
 
 This package is an unsigned PowerShell/ZIP development artifact, not the
@@ -436,7 +437,14 @@ Before any public beta or production claim, CertBaton still requires:
 - completion and review of the ACME, secret-vault, SSH/SFTP, deployment,
   rollback, public-verification, scheduling, and alerting gates.
 
-Passing the developer package tests proves the local installer and Service
-boundaries that the audit actually checks. Passing the fake live-workflow tests
-proves orchestration against test doubles. Neither result proves public ACME,
-SSH/Nginx interoperability, rollback under real failures, or production safety.
+The 2026-08-04 qualification run adds evidence that one exact developer build
+can complete public staging ACME, exact-pinned SSH/SFTP, fixed-helper Nginx
+activation, independent public TLS verification, cleanup, and durable reload
+after a Service restart. The installer repair path also restored the prior
+running Service after multiple pre-commit failures during that exercise.
+
+This remains a single manually authorized target and staging order. It does
+not prove clean-machine compatibility, least-privilege behavior across hosting
+layouts, rollback under injected real-target failures, unattended scheduling,
+alerting, production ACME safety, or support for any matrix entry. See the
+[qualification record](../qualification/live-staging-2026-08-04.md).

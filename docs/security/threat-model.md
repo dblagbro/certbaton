@@ -12,10 +12,11 @@ target enrollment, DPAPI-NG protected records, durable live SQLite state,
 exact-pinned SSH.NET/SFTP, an Anvil ACME adapter, HTTP-01 pre-validation, a
 fixed remote Nginx helper contract, public TLS verification, basic scheduling,
 and a live-default WPF evidence view. Local fake-workflow and isolated helper
-tests exist. A real public Let's Encrypt staging order, real Nginx deployment,
-and the installed-Service lifecycle have not yet passed as one qualified
-workflow. WinSCP import, outbound alerts, a signed MSI, and production support
-also remain absent.
+tests exist. One manually authorized installed-Service workflow completed a
+real public Let's Encrypt staging order, real Nginx deployment, public TLS
+verification, cleanup, and durable reload on 2026-08-04. This single run is not
+broad qualification. WinSCP import, outbound alerts, a signed MSI, real-target
+failure injection, and production support remain absent.
 
 The live code can change remote certificate state. “Pre-alpha” is a release
 warning, not a simulation guarantee. It may be exercised only against a
@@ -257,8 +258,9 @@ SSH. Failure initiates the typed rollback path. Success requires persisted
 public TLS and challenge-cleanup evidence.
 
 The root-owned helper and hostile-input checks have an isolated Linux shim
-suite. Real Nginx, Docker bind mounts, sudoers, SFTP filesystem races, public
-TLS, process kill, and rollback-failure qualification remain open. A
+suite. One staging run exercised real Nginx, Docker bind mounts, sudoers, and
+public TLS. Hostile SFTP filesystem races, process kill, connection-loss
+boundaries, and rollback-failure qualification remain open. A
 transitional or uncertain activation is persisted as `rollback-required`, not
 automatically replayed or reported successful.
 
@@ -518,8 +520,8 @@ provenance, trustworthiness, or secure update delivery.
   scheduler, and live UI have focused local tests.
 - [x] The isolated helper suite covers happy path, rejection, idempotent retry,
   interrupted activation/rollback, commit, abort, status, and recovery reports.
-- [x] Documentation and UI identify the path as pre-alpha and do not present
-  local fake tests as public staging or production evidence.
+- [x] Documentation and UI identify the path as pre-alpha and distinguish the
+  single public staging result from production or support evidence.
 
 ### Required before production acceptance of sensitive or mutating IPC
 
@@ -571,7 +573,8 @@ provenance, trustworthiness, or secure update delivery.
 - [ ] Complete protocol, TLS, redirect, bad nonce, retry, rate-limit,
   concurrency, restart, and problem-response tests.
 - [x] Prove exact HTTP-01 placement, external pre-validation, and cleanup in
-  local fake workflows; public staging and restart/error integration remain.
+  local fake workflows and one public staging run; error integration and
+  repeated restart qualification remain.
 - [ ] Require an explicit, audited transition from staging to production.
 - [x] Route account and certificate keys through the vault interfaces in local
   implementation tests; installed lifecycle qualification remains.
@@ -579,12 +582,13 @@ provenance, trustworthiness, or secure update delivery.
 ### Required before a supported deployment recipe
 
 - [x] Validate certificate/key pairing, names, fixed modes/ownership, Nginx
-  configuration, and typed activation in local/helper fixtures; real chain and
-  remote layout qualification remains.
+  configuration, and typed activation in local/helper fixtures and one real
+  staging chain/layout; repeatable qualification remains.
 - [ ] Inject failure at every stage and prove the previous working deployment is
   preserved or restored.
 - [x] Prove with fakes that a stale or wrong public certificate prevents
-  success after upload/reload; repeat on a real public endpoint.
+  success after upload/reload, and prove the positive exact-leaf case once on a
+  real public endpoint; repeat the negative case remotely.
 - [ ] Record expected and observed public TLS evidence and document single-vantage
   limitations.
 - [ ] Pass reboot, sleep, logout, network-loss, duplicate-trigger, full-disk,

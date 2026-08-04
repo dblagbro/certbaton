@@ -19,13 +19,16 @@ basic automatic schedule. The WPF application's main view shows live targets
 and renewal evidence; the synthetic simulator remains available as a secondary
 developer tool.
 
-That is implementation progress, not field qualification. The complete live
-workflow currently has local fake-workflow tests and the Nginx helper has an
-isolated Linux fixture. It has **not** completed an end-to-end order against a
-public Let's Encrypt staging endpoint, an installed-Service vault lifecycle,
-or a real remote Nginx qualification. Production issuance, production
-deployment, WinSCP import, an enrollment wizard, outbound alerts, a signed MSI,
-and a supported release all remain unavailable.
+That is implementation progress, not a support claim. On 2026-08-04, the
+installed Windows Service completed the first manually authorized end-to-end
+qualification run against Let's Encrypt staging and an isolated remote
+Linux/Nginx Docker target. The run proved public HTTP-01 validation, issuance,
+deployment, activation, independent public TLS verification, challenge
+cleanup, durable evidence after a Service restart, and restoration of the
+target's trusted baseline. It was one staging run on one developer fixture;
+production issuance and deployment, failure-injection coverage on a real
+target, WinSCP import, an enrollment wizard, outbound alerts, a signed MSI, and
+a supported release all remain unavailable.
 
 The named-pipe foundation validates the connected server process against the
 SCM registration, identifies callers with an Identification-level Windows
@@ -195,8 +198,9 @@ target has passed a reviewed manual staging exercise.
 The [disposable local target](docs/fixtures/local-target.md), the isolated
 [Nginx helper fixture](fixtures/remote-nginx-helper/README.md), and the Let's
 Encrypt staging environment are the intended integration sequence. Local fake
-workflow and helper tests do not replace a real public staging exercise. Any
-test involving a publicly reachable website requires:
+workflow and helper tests, plus the single recorded public staging run, do not
+replace repeatable qualification. Any test involving a publicly reachable
+website requires:
 
 - explicit owner authorization;
 - a declared maintenance window;

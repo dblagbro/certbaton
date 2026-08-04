@@ -35,10 +35,12 @@ Current implementation snapshot:
   SQLite, and marks a run interrupted on recovery instead of inferring success.
 - The WPF shell can start a success or single-stage-failure simulation and show
   its durable evidence timeline.
-- The disposable SSH/SFTP and Nginx fixture is defined and passes offline
-  configuration checks; live container smoke testing is still pending.
-- Installer-owned identities and ACLs, real secrets, network adapters, ACME,
-  remote deployment, alerting, and production support remain gated.
+- The disposable SSH/SFTP and Nginx fixture passes its isolated helper suite.
+- One installed developer build completed a manually authorized public staging
+  order, exact-pinned remote deployment, independent TLS verification, cleanup,
+  durable Service restart check, and trusted-baseline restoration.
+- Clean-machine installer qualification, real-target failure injection,
+  alerting, and production support remain gated.
 
 ## Phase 1: first safe certificate handoff
 

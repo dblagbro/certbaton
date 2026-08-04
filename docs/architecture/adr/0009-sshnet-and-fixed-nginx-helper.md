@@ -1,6 +1,6 @@
 # ADR 0009: Use SSH.NET with exact pins and a fixed Nginx helper
 
-- Status: Accepted for pre-alpha fixture; real-target qualification gate open
+- Status: Accepted for pre-alpha fixture; one staging qualification run passed
 - Date: 2026-07-31
 - Decision owners: CertBaton maintainers
 
@@ -80,10 +80,17 @@ success response is never sufficient to mark the renewal successful.
   mismatch and unexpected-file rejection, interrupted activation and rollback,
   failed activation restoration, commit, abort, status, root overlap, and
   recovery reporting.
+- On 2026-08-04, the installed Windows Service completed one manually
+  authorized Let's Encrypt staging order through exact-pinned SSH/SFTP and the
+  root-owned fixed helper on an isolated real Nginx Docker target. Public
+  HTTP-01, activation, independent public TLS verification, cleanup, commit,
+  durable evidence after Service restart, and restoration of the prior trusted
+  runtime all passed.
 
-The helper tests use harmless Nginx and service-manager shims. They do not
-exercise a public ACME order, a real Nginx process, Docker bind mounts, an
-actual sudoers rule, hostile SFTP races, or public TLS.
+The helper shim tests do not exercise hostile SFTP races. The single staging
+qualification exercised a public ACME order, a real Nginx process, Docker bind
+mounts, an actual sudoers rule, and public TLS, but it did not inject failures
+or establish a supported matrix.
 
 ## Consequences and open gates
 
