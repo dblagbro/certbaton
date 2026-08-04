@@ -110,6 +110,7 @@ function Assert-NoReparsePointsInTree {
 function Invoke-Sc {
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
         [string[]] $Arguments,
 
         [switch] $AllowMissing
