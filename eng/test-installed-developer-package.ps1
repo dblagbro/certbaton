@@ -328,16 +328,34 @@ Assert-Condition `
 Assert-Condition `
     -Condition ($serviceRecord.StartName -ieq "NT SERVICE\$serviceName") `
     -Message 'The service does not use the dedicated CertBaton virtual account.'
-Assert-Condition -Condition ($serviceRecord.StartMode -eq 'Auto') `
-    -Message 'The service is not configured for automatic start.'
+if ($MaintenanceExpected) {
+    Assert-Condition -Condition ($serviceRecord.StartMode -eq 'Manual') `
+        -Message 'The maintenance audit service is not demand-start only.'
+}
+else {
+    Assert-Condition -Condition ($serviceRecord.StartMode -eq 'Auto') `
+        -Message 'The service is not configured for automatic start.'
+}
 Assert-Condition -Condition ($serviceRecord.State -eq 'Running') `
     -Message 'The CertBaton service is not running.'
 
-$delayedAutoStart = Get-ItemPropertyValue `
-    -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName" `
-    -Name DelayedAutoStart
-Assert-Condition -Condition ($delayedAutoStart -eq 1) `
-    -Message 'The service is not configured for delayed automatic start.'
+$serviceProperties = Get-ItemProperty `
+    -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName"
+$delayedAutoStart = if ($serviceProperties.PSObject.Properties.Name -contains
+    'DelayedAutoStart') {
+    [int]$serviceProperties.DelayedAutoStart
+}
+else {
+    0
+}
+if ($MaintenanceExpected) {
+    Assert-Condition -Condition ($delayedAutoStart -eq 0) `
+        -Message 'Delayed automatic start remains enabled during maintenance.'
+}
+else {
+    Assert-Condition -Condition ($delayedAutoStart -eq 1) `
+        -Message 'The service is not configured for delayed automatic start.'
+}
 
 $serviceRegistryPath =
     "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName"
@@ -370,21 +388,34 @@ Assert-Condition -Condition ($actualServiceDacl -ceq $serviceDacl) `
         'The CertBaton service DACL is not exact. Expected ' +
         "'$serviceDacl'; found '$actualServiceDacl'.")
 
-$expectedFailureActions =
-    '80-51-01-00-00-00-00-00-00-00-00-00-03-00-00-00-' +
-    '14-00-00-00-01-00-00-00-88-13-00-00-01-00-00-00-' +
-    '98-3A-00-00-01-00-00-00-60-EA-00-00'
-$failureActions = Get-ItemPropertyValue -Path $serviceRegistryPath `
-    -Name FailureActions
-$actualFailureActions = [BitConverter]::ToString($failureActions)
-Assert-Condition -Condition (
-    $actualFailureActions -ceq $expectedFailureActions) `
-    -Message 'The service restart actions, delays, or reset period are not exact.'
 $failureActionsOnNonCrash = Get-ItemPropertyValue `
     -Path $serviceRegistryPath `
     -Name FailureActionsOnNonCrashFailures
-Assert-Condition -Condition ($failureActionsOnNonCrash -eq 1) `
-    -Message 'The service failure-actions flag is not enabled.'
+if ($MaintenanceExpected) {
+    $failureQuery = @(& sc.exe qfailure $serviceName 2>&1)
+    Assert-Condition -Condition ($LASTEXITCODE -eq 0) `
+        -Message 'Unable to query service failure actions during maintenance.'
+    Assert-Condition -Condition (
+        -not (($failureQuery -join [Environment]::NewLine) -match
+            '(?im)^\s*(RESTART|RUN COMMAND|REBOOT)\s')) `
+        -Message 'A service recovery action remains enabled during maintenance.'
+    Assert-Condition -Condition ($failureActionsOnNonCrash -eq 0) `
+        -Message 'The non-crash recovery flag remains enabled during maintenance.'
+}
+else {
+    $expectedFailureActions =
+        '80-51-01-00-00-00-00-00-00-00-00-00-03-00-00-00-' +
+        '14-00-00-00-01-00-00-00-88-13-00-00-01-00-00-00-' +
+        '98-3A-00-00-01-00-00-00-60-EA-00-00'
+    $failureActions = Get-ItemPropertyValue -Path $serviceRegistryPath `
+        -Name FailureActions
+    $actualFailureActions = [BitConverter]::ToString($failureActions)
+    Assert-Condition -Condition (
+        $actualFailureActions -ceq $expectedFailureActions) `
+        -Message 'The service restart actions, delays, or reset period are not exact.'
+    Assert-Condition -Condition ($failureActionsOnNonCrash -eq 1) `
+        -Message 'The service failure-actions flag is not enabled.'
+}
 
 $fullControl = [int][Security.AccessControl.FileSystemRights]::FullControl
 $readExecute = [int](
