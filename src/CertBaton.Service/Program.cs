@@ -70,6 +70,7 @@ builder.Services.AddSingleton<IVaultProbe, VaultProbe>();
 builder.Services.AddSingleton<ICredentialImporter, CredentialImporter>();
 builder.Services.AddSingleton<IAcmeEngine, AnvilAcmeEngine>();
 builder.Services.AddSingleton<IRemoteSshSessionFactory, SshNetSessionFactory>();
+builder.Services.AddSingleton<ISshConnectionProbe, SshNetConnectionProbe>();
 builder.Services.AddSingleton<IPublicHttp01Verifier, PublicHttp01Verifier>();
 builder.Services.AddSingleton<IPublicTlsVerifier, PublicTlsVerifier>();
 builder.Services.AddSingleton<

@@ -220,17 +220,20 @@ a release gate.
 
 ### Flow 1: connection enrollment and metadata import
 
-**Partial.** An elevated administrator can explicitly import a bounded SSH
-private key into the DPAPI-NG Service vault and enroll a strict non-secret JSON
-target. Enrollment requires a distinct opaque credential reference, exact host,
+**Partial.** An elevated administrator can use the WPF **Add website** flow to
+select a bounded SSH private key, perform a read-only authenticated SSH/SFTP
+probe, confirm the observed server identity, protect the key in the DPAPI-NG
+Service vault, and enroll a strict target. Enrollment requires an opaque
+credential reference, exact host,
 port, algorithm, raw host-key blob and matching SHA-256 fingerprint, DNS names,
 typed paths, exact Let's Encrypt environment, contact, terms acknowledgement,
 and schedule policy. SQLite commits the aggregate atomically and rejects an
 immutable-identity conflict.
 
-The UI enrollment wizard, WinSCP discovery, field-by-field metadata preview,
-password handling, connection diagnosis, credential rotation/revocation, and
-guided host-key rotation are **planned**. Importing another application's saved
+The first guided SSH/SFTP flow is implemented. WinSCP discovery,
+field-by-field metadata preview, password handling, broader capability
+diagnosis, credential rotation/revocation, guided host-key rotation, and other
+hosting connectors remain **planned**. Importing another application's saved
 password remains prohibited.
 
 ### Flow 2: scheduled issuance

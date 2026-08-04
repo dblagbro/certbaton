@@ -11,6 +11,7 @@ public static class IpcProtocol
     public const string VaultProbeMethod = "vault.probe";
     public const string CredentialImportSshPrivateKeyMethod =
         "credential.importSshPrivateKey";
+    public const string SshConnectionProbeMethod = "connection.probeSshSftp";
     public const string TargetEnrollMethod = "target.enroll";
     public const string TargetListMethod = "target.list";
     public const string RenewalStartMethod = "renewal.start";

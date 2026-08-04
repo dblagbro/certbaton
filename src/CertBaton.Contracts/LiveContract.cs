@@ -6,6 +6,11 @@ namespace CertBaton.Contracts;
 
 public static class LiveContractValues
 {
+    public const string SshSftpConnector = "ssh-sftp";
+    public const string SshScpConnector = "ssh-scp";
+    public const string CpanelConnector = "cpanel-api";
+    public const string PleskConnector = "plesk-api";
+    public const string DirectAdminConnector = "directadmin-api";
     public const string LetsEncryptStaging = "lets-encrypt-staging";
     public const string LetsEncryptProduction = "lets-encrypt-production";
     public const string UnconfiguredCertificateAuthority = "unconfigured";
@@ -19,6 +24,75 @@ public static class LiveContractValues
 
     public static bool IsCertificateAuthority(string value) =>
         value is LetsEncryptStaging or LetsEncryptProduction;
+}
+
+public sealed record SshConnectionProbePayload(
+    string Host,
+    int Port,
+    string Username,
+    byte[] PrivateKey)
+{
+    public bool TryValidate(out string? error)
+    {
+        if (!TargetEnrollmentPayload.TryNormalizeHost(Host, out _) ||
+            !TargetEnrollmentPayload.IsBoundedText(Username, 128) ||
+            Port is < 1 or > 65_535)
+        {
+            error = "The SSH server address, port, or username is invalid.";
+            return false;
+        }
+
+        if (PrivateKey is null ||
+            PrivateKey.Length == 0 ||
+            PrivateKey.Length > CredentialContractValues.MaximumSecretBytes)
+        {
+            error =
+                $"An SSH private key must contain between 1 and {CredentialContractValues.MaximumSecretBytes} bytes.";
+            return false;
+        }
+
+        error = null;
+        return true;
+    }
+}
+
+public sealed record SshConnectionProbeSnapshot(
+    string ConnectorKind,
+    string Host,
+    int Port,
+    string Username,
+    string HostKeyAlgorithm,
+    string HostKeyFingerprintSha256,
+    string HostKeyBase64,
+    bool AuthenticationSucceeded,
+    bool SftpAvailable,
+    DateTimeOffset CheckedAtUtc)
+{
+    public bool TryValidate(out string? error)
+    {
+        if (ConnectorKind != LiveContractValues.SshSftpConnector ||
+            !TargetEnrollmentPayload.TryNormalizeHost(Host, out _) ||
+            !TargetEnrollmentPayload.IsBoundedText(Username, 128) ||
+            Port is < 1 or > 65_535 ||
+            !TargetEnrollmentPayload.IsHostKeyAlgorithm(HostKeyAlgorithm) ||
+            !TargetEnrollmentPayload.IsCanonicalSha256Fingerprint(
+                HostKeyFingerprintSha256) ||
+            !TargetEnrollmentPayload.TryValidateRawHostKey(HostKeyBase64) ||
+            !TargetEnrollmentPayload.RawHostKeyMatchesFingerprint(
+                HostKeyBase64,
+                HostKeyFingerprintSha256) ||
+            !AuthenticationSucceeded ||
+            !SftpAvailable ||
+            CheckedAtUtc == default ||
+            CheckedAtUtc.Offset != TimeSpan.Zero)
+        {
+            error = "The SSH/SFTP connection test result is invalid.";
+            return false;
+        }
+
+        error = null;
+        return true;
+    }
 }
 
 public sealed record TargetEnrollmentPayload(
@@ -127,13 +201,13 @@ public sealed record TargetEnrollmentPayload(
         return true;
     }
 
-    private static bool IsBoundedText(string? value, int maximumLength) =>
+    internal static bool IsBoundedText(string? value, int maximumLength) =>
         !string.IsNullOrWhiteSpace(value) &&
         value.Length <= maximumLength &&
         string.Equals(value, value.Trim(), StringComparison.Ordinal) &&
         !value.Any(char.IsControl);
 
-    private static bool TryNormalizeHost(string? value, out string? normalized)
+    internal static bool TryNormalizeHost(string? value, out string? normalized)
     {
         normalized = null;
         if (!IsBoundedText(value, 253))
@@ -181,7 +255,7 @@ public sealed record TargetEnrollmentPayload(
         }
     }
 
-    private static bool IsHostKeyAlgorithm(string? value) =>
+    internal static bool IsHostKeyAlgorithm(string? value) =>
         value is "ssh-ed25519" or
             "ecdsa-sha2-nistp256" or
             "ecdsa-sha2-nistp384" or
@@ -189,7 +263,7 @@ public sealed record TargetEnrollmentPayload(
             "rsa-sha2-256" or
             "rsa-sha2-512";
 
-    private static bool IsCanonicalSha256Fingerprint(string? value)
+    internal static bool IsCanonicalSha256Fingerprint(string? value)
     {
         if (string.IsNullOrEmpty(value) ||
             !value.StartsWith("SHA256:", StringComparison.Ordinal) ||
@@ -215,7 +289,7 @@ public sealed record TargetEnrollmentPayload(
         }
     }
 
-    private static bool TryValidateRawHostKey(string? value)
+    internal static bool TryValidateRawHostKey(string? value)
     {
         if (value is null)
         {
@@ -237,7 +311,7 @@ public sealed record TargetEnrollmentPayload(
         }
     }
 
-    private static bool RawHostKeyMatchesFingerprint(
+    internal static bool RawHostKeyMatchesFingerprint(
         string? rawHostKeyBase64,
         string fingerprintSha256)
     {

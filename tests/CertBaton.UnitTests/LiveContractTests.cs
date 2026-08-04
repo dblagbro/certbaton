@@ -7,6 +7,93 @@ namespace CertBaton.UnitTests;
 public sealed class LiveContractTests
 {
     [TestMethod]
+    public void ConnectorCatalogDistinguishesWorkingAndPlannedBackends()
+    {
+        var sshSftp = HostingConnectorCatalog.Find(
+            LiveContractValues.SshSftpConnector);
+        var sshScp = HostingConnectorCatalog.Find(
+            LiveContractValues.SshScpConnector);
+
+        Assert.AreEqual(
+            HostingConnectorAvailability.AvailablePreAlpha,
+            sshSftp.Availability);
+        Assert.IsTrue(
+            sshSftp.Capabilities.HasFlag(
+                HostingConnectorCapabilities.Rollback));
+        Assert.AreEqual(
+            HostingConnectorAvailability.Planned,
+            sshScp.Availability);
+        Assert.IsFalse(
+            sshScp.Capabilities.HasFlag(
+                HostingConnectorCapabilities.Activation));
+        Assert.Throws<ArgumentException>(
+            () => HostingConnectorCatalog.Find("unknown"));
+    }
+
+    [TestMethod]
+    public void SshProbeRequestAndResponseAreStrictAndMethodSpecific()
+    {
+        var privateKey = "private-key"u8.ToArray();
+        var request = IpcRequest.CreateSshConnectionProbe(
+            TimeProvider.System,
+            new SshConnectionProbePayload(
+                "ssh.example.test",
+                22,
+                "designer",
+                privateKey));
+        var hostKey = RandomNumberGenerator.GetBytes(48);
+        var snapshot = new SshConnectionProbeSnapshot(
+            LiveContractValues.SshSftpConnector,
+            "ssh.example.test",
+            22,
+            "designer",
+            "ssh-ed25519",
+            "SHA256:" +
+                Convert.ToBase64String(SHA256.HashData(hostKey)).TrimEnd('='),
+            Convert.ToBase64String(hostKey),
+            AuthenticationSucceeded: true,
+            SftpAvailable: true,
+            DateTimeOffset.UtcNow);
+        var response = IpcResponse.Succeeded(request.RequestId, snapshot);
+
+        Assert.AreEqual(IpcProtocol.SshConnectionProbeMethod, request.Method);
+        Assert.IsTrue(request.TryValidateMethodPayload(out var requestError), requestError);
+        Assert.IsTrue(
+            response.TryValidateForMethod(request.Method, out var responseError),
+            responseError);
+        Assert.IsFalse(
+            response.TryValidateForMethod(IpcProtocol.TargetEnrollMethod, out _));
+    }
+
+    [TestMethod]
+    public void SshProbeRejectsMissingSecretAndMismatchedHostKey()
+    {
+        var missingSecret = new SshConnectionProbePayload(
+            "ssh.example.test",
+            22,
+            "designer",
+            []);
+        var hostKey = RandomNumberGenerator.GetBytes(48);
+        var mismatched = new SshConnectionProbeSnapshot(
+            LiveContractValues.SshSftpConnector,
+            "ssh.example.test",
+            22,
+            "designer",
+            "ssh-ed25519",
+            "SHA256:" +
+                Convert.ToBase64String(
+                    SHA256.HashData(RandomNumberGenerator.GetBytes(48)))
+                    .TrimEnd('='),
+            Convert.ToBase64String(hostKey),
+            AuthenticationSucceeded: true,
+            SftpAvailable: true,
+            DateTimeOffset.UtcNow);
+
+        Assert.IsFalse(missingSecret.TryValidate(out _));
+        Assert.IsFalse(mismatched.TryValidate(out _));
+    }
+
+    [TestMethod]
     public void EnrollmentFactoryCreatesStrictMethodPayload()
     {
         var payload = CreateEnrollmentPayload();

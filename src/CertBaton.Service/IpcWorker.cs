@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Security.Cryptography;
+using CertBaton.Application.Remote;
 using CertBaton.Application.Simulation.Persistence;
 using CertBaton.Contracts;
 using CertBaton.Ipc.NamedPipes;
@@ -16,6 +17,7 @@ public sealed partial class IpcWorker : BackgroundService
     private readonly LiveMaintenanceGate maintenanceGate;
     private readonly IVaultProbe? vaultProbe;
     private readonly ICredentialImporter? credentialImporter;
+    private readonly ISshConnectionProbe? sshConnectionProbe;
     private readonly ILiveTargetCoordinator? liveTargetCoordinator;
     private readonly ILiveRenewalCoordinator? liveRenewalCoordinator;
     private readonly DateTimeOffset startedAtUtc;
@@ -29,6 +31,7 @@ public sealed partial class IpcWorker : BackgroundService
         TimeProvider timeProvider,
         IVaultProbe? vaultProbe = null,
         ICredentialImporter? credentialImporter = null,
+        ISshConnectionProbe? sshConnectionProbe = null,
         ILiveTargetCoordinator? liveTargetCoordinator = null,
         ILiveRenewalCoordinator? liveRenewalCoordinator = null,
         LiveMaintenanceGate? maintenanceGate = null)
@@ -41,6 +44,7 @@ public sealed partial class IpcWorker : BackgroundService
         this.maintenanceGate = maintenanceGate ?? new LiveMaintenanceGate();
         this.vaultProbe = vaultProbe;
         this.credentialImporter = credentialImporter;
+        this.sshConnectionProbe = sshConnectionProbe;
         this.liveTargetCoordinator = liveTargetCoordinator;
         this.liveRenewalCoordinator = liveRenewalCoordinator;
         startedAtUtc = timeProvider.GetUtcNow();
@@ -68,6 +72,11 @@ public sealed partial class IpcWorker : BackgroundService
             if (request.CredentialPayload?.Secret is { } invalidSecret)
             {
                 CryptographicOperations.ZeroMemory(invalidSecret);
+            }
+
+            if (request.SshConnectionProbePayload?.PrivateKey is { } invalidProbeKey)
+            {
+                CryptographicOperations.ZeroMemory(invalidProbeKey);
             }
 
             return IpcResponse.Failed(
@@ -157,6 +166,78 @@ public sealed partial class IpcWorker : BackgroundService
                 request.RequestId,
                 "service_maintenance",
                 "State-changing work is paused while installation maintenance is in progress.");
+        }
+
+        if (string.Equals(
+                request.Method,
+                IpcProtocol.SshConnectionProbeMethod,
+                StringComparison.Ordinal))
+        {
+            var payload = request.SshConnectionProbePayload ??
+                throw new InvalidOperationException(
+                    "A validated SSH/SFTP connection test did not contain its payload.");
+            try
+            {
+                if (!simulationAccessPolicy.CanStart(identity))
+                {
+                    return IpcResponse.Failed(
+                        request.RequestId,
+                        "connection_probe_forbidden",
+                        "Administrator approval is required to test a hosting connection.");
+                }
+
+                if (sshConnectionProbe is null)
+                {
+                    return IpcResponse.Failed(
+                        request.RequestId,
+                        "connection_probe_unavailable",
+                        "SSH/SFTP connection testing is not configured.");
+                }
+
+                var endpoint = RemoteSshEndpoint.Create(
+                    payload.Host,
+                    payload.Port,
+                    payload.Username);
+                using var privateKey = new RemotePrivateKeyMaterial(
+                    payload.PrivateKey);
+                var result = await sshConnectionProbe.ProbeAsync(
+                        endpoint,
+                        privateKey,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                return IpcResponse.Succeeded(
+                    request.RequestId,
+                    new SshConnectionProbeSnapshot(
+                        LiveContractValues.SshSftpConnector,
+                        result.Endpoint.Host,
+                        result.Endpoint.Port,
+                        result.Endpoint.Username,
+                        result.HostKeyAlgorithm,
+                        result.HostKeyFingerprintSha256,
+                        result.HostKeyBase64,
+                        result.AuthenticationSucceeded,
+                        result.SftpAvailable,
+                        timeProvider.GetUtcNow()));
+            }
+            catch (Exception exception) when (
+                exception is ArgumentException or
+                SshConnectionProbeException or
+                IOException or
+                UnauthorizedAccessException)
+            {
+                LogLiveRequestFailed(
+                    logger,
+                    IpcProtocol.SshConnectionProbeMethod,
+                    exception);
+                return IpcResponse.Failed(
+                    request.RequestId,
+                    "connection_probe_failed",
+                    "CertBaton could not sign in to this SSH/SFTP server with the selected key.");
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(payload.PrivateKey);
+            }
         }
 
         if (string.Equals(

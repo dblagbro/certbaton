@@ -88,7 +88,7 @@ The following gates remain open:
 - real-target failure injection at every remote and network boundary;
 - rollback failure, full-disk, hostile filesystem race, and process-kill tests;
 - unattended scheduled renewal and deduplicated operator alerts;
-- guided enrollment, WinSCP metadata import, signing, MSI, provenance, and
+- WinSCP metadata import, additional connectors, signing, MSI, provenance, and
   external security review.
 
 The result therefore reduces interoperability uncertainty but does not change

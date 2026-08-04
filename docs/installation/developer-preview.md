@@ -202,11 +202,15 @@ non-elevated installed client is expected to return
 
 ## Exercise the live staging path
 
-The live path is intentionally operator-driven in this preview. There is no
-enrollment wizard, WinSCP importer, remote helper installer, or production-safe
-compatibility detector. Every live command currently requires an elevated
-administrator in the installed profile. The development console profile admits
-only its current user, but it is not a substitute for installed-Service tests.
+The live path is intentionally operator-driven in this preview. The installed
+desktop provides a guided **Add website** flow for the SSH/SFTP connector: it
+tests the login without remote changes, displays the observed host identity for
+confirmation, protects the selected key, and enrolls the site. There is no
+WinSCP importer, remote helper installer, production-safe compatibility
+detector, or additional working connector yet. The desktop requests elevation
+because installed live IPC access currently requires an administrator. The
+development console profile admits only its current user, but it is not a
+substitute for installed-Service tests.
 
 Before enrolling anything, complete all of the following:
 

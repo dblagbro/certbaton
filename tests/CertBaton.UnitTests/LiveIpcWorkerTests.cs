@@ -1,6 +1,7 @@
 using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Security.Principal;
+using CertBaton.Application.Remote;
 using CertBaton.Application.Simulation.Persistence;
 using CertBaton.Contracts;
 using CertBaton.Ipc.NamedPipes;
@@ -12,6 +13,63 @@ namespace CertBaton.UnitTests;
 [TestClass]
 public sealed class LiveIpcWorkerTests
 {
+    [TestMethod]
+    public async Task AdministratorCanTestSshSftpConnectionWithoutPersistingKey()
+    {
+        var options = CreateOptions(PipeServerSecurityProfile.InstalledService);
+        var probe = new StubSshConnectionProbe();
+        var worker = CreateWorker(options, null, null, sshConnectionProbe: probe);
+        var key =
+            "-----BEGIN PRIVATE KEY-----\nprobe\n-----END PRIVATE KEY-----"u8.ToArray();
+        var request = IpcRequest.CreateSshConnectionProbe(
+            TimeProvider.System,
+            new SshConnectionProbePayload(
+                "SSH.EXAMPLE.TEST.",
+                22,
+                "designer",
+                key));
+
+        var response = await worker.HandleRequestAsync(
+            request,
+            CreateIdentity(isAdministrator: true),
+            CancellationToken.None);
+
+        Assert.IsTrue(response.Success);
+        Assert.AreEqual("ssh.example.test", response.Result?.SshConnectionProbe?.Host);
+        Assert.IsTrue(response.Result?.SshConnectionProbe?.SftpAvailable);
+        Assert.AreEqual(key.Length, probe.PrivateKeyLength);
+        Assert.IsTrue(
+            request.SshConnectionProbePayload!.PrivateKey.All(
+                static value => value == 0));
+    }
+
+    [TestMethod]
+    public async Task OrdinaryUserCannotTestHostingConnectionAndKeyIsZeroed()
+    {
+        var options = CreateOptions(PipeServerSecurityProfile.InstalledService);
+        var probe = new StubSshConnectionProbe();
+        var worker = CreateWorker(options, null, null, sshConnectionProbe: probe);
+        var request = IpcRequest.CreateSshConnectionProbe(
+            TimeProvider.System,
+            new SshConnectionProbePayload(
+                "ssh.example.test",
+                22,
+                "designer",
+                "private-key"u8.ToArray()));
+
+        var response = await worker.HandleRequestAsync(
+            request,
+            CreateIdentity(isAdministrator: false),
+            CancellationToken.None);
+
+        Assert.IsFalse(response.Success);
+        Assert.AreEqual("connection_probe_forbidden", response.Error?.Code);
+        Assert.AreEqual(0, probe.PrivateKeyLength);
+        Assert.IsTrue(
+            request.SshConnectionProbePayload!.PrivateKey.All(
+                static value => value == 0));
+    }
+
     [TestMethod]
     public async Task InstalledServiceDeniesOrdinaryLiveEnrollmentBeforePersistence()
     {
@@ -161,13 +219,15 @@ public sealed class LiveIpcWorkerTests
         IpcServerOptions options,
         ILiveTargetCoordinator? targets,
         ILiveRenewalCoordinator? renewals,
-        LiveMaintenanceGate? maintenanceGate = null) =>
+        LiveMaintenanceGate? maintenanceGate = null,
+        ISshConnectionProbe? sshConnectionProbe = null) =>
         new(
             new CertBatonPipeServer(options),
             new NullSimulationCoordinator(),
             new SimulationAccessPolicy(options),
             NullLogger<IpcWorker>.Instance,
             TimeProvider.System,
+            sshConnectionProbe: sshConnectionProbe,
             liveTargetCoordinator: targets,
             liveRenewalCoordinator: renewals,
             maintenanceGate: maintenanceGate);
@@ -294,6 +354,31 @@ public sealed class LiveIpcWorkerTests
         {
             FindOperationId = operationId;
             return operation.OperationId == operationId ? operation : null;
+        }
+    }
+
+    private sealed class StubSshConnectionProbe : ISshConnectionProbe
+    {
+        public int PrivateKeyLength { get; private set; }
+
+        public Task<SshConnectionProbeResult> ProbeAsync(
+            RemoteSshEndpoint endpoint,
+            RemotePrivateKeyMaterial privateKey,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var stream = privateKey.OpenReadStream();
+            PrivateKeyLength = checked((int)stream.Length);
+            var hostKey = RandomNumberGenerator.GetBytes(48);
+            return Task.FromResult(
+                new SshConnectionProbeResult(
+                    endpoint,
+                    "ssh-ed25519",
+                    "SHA256:" +
+                        Convert.ToBase64String(SHA256.HashData(hostKey)).TrimEnd('='),
+                    Convert.ToBase64String(hostKey),
+                    AuthenticationSucceeded: true,
+                    SftpAvailable: true));
         }
     }
 

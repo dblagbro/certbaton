@@ -10,7 +10,7 @@ public sealed class MainWindowLiveViewModelTests
         new(2026, 7, 31, 14, 0, 0, TimeSpan.Zero);
 
     [TestMethod]
-    public async Task EmptyTargetListShowsCommandLineEnrollmentGuidance()
+    public async Task EmptyTargetListShowsUiEnrollmentGuidance()
     {
         var viewModel = CreateViewModel(
             new TargetListSnapshot(Array.Empty<TargetSnapshot>()),
@@ -23,10 +23,10 @@ public sealed class MainWindowLiveViewModelTests
 
         Assert.IsEmpty(viewModel.Targets);
         Assert.IsNull(viewModel.SelectedTarget);
-        Assert.AreEqual("No enrolled targets", viewModel.LiveStatus);
+        Assert.AreEqual("No websites yet", viewModel.LiveStatus);
         StringAssert.Contains(
             viewModel.LiveSummary,
-            "certbatonctl target enroll --config");
+            "Add website");
         Assert.IsFalse(viewModel.StartRenewalCommand.CanExecute(null));
     }
 

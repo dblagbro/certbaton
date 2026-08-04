@@ -27,7 +27,7 @@ deployment, activation, independent public TLS verification, challenge
 cleanup, durable evidence after a Service restart, and restoration of the
 target's trusted baseline. It was one staging run on one developer fixture;
 production issuance and deployment, failure-injection coverage on a real
-target, WinSCP import, an enrollment wizard, outbound alerts, a signed MSI, and
+target, WinSCP import, additional hosting connectors, outbound alerts, a signed MSI, and
 a supported release all remain unavailable.
 
 The named-pipe foundation validates the connected server process against the
@@ -178,20 +178,18 @@ follow the [Windows developer preview guide](docs/installation/developer-preview
 
 ### Pre-alpha live exercise
 
-The [Windows developer preview guide](docs/installation/developer-preview.md)
-documents the current `vault probe`, `credential import-ssh-key`,
-`target enroll`, `target list`, `renewal start`, and `renewal get` commands.
-Begin with the synthetic
-[staging enrollment example](docs/examples/target-enrollment.staging.example.json).
-Its names, identifiers, paths, and host key are intentionally unusable and must
-be replaced outside the repository.
+The Windows desktop now provides the primary guided **Add website** workflow.
+It collects plain-language website and hosting details, browses for an SSH key,
+tests SSH/SFTP without changing the server, displays the observed server
+identity for confirmation, protects the key, and adds the site to the
+multi-site inventory. Advanced Nginx paths remain available for reviewed test
+profiles. The diagnostic CLI exercises the same contracts but is not required
+for enrollment or renewal.
 
-The default live UI does not yet include an enrollment wizard. All live IPC
-methods currently require the current user in the development profile or an
-elevated administrator in the installed profile. Automatic scheduling exists,
-but retry policy is preliminary and no toast, email, webhook, or other
-unattended alert channel exists. Keep `autoRenew` disabled until a disposable
-target has passed a reviewed manual staging exercise.
+Installed live operations currently require elevation. Automatic scheduling
+exists, but retry policy is preliminary and no toast, email, webhook, or other
+unattended alert channel exists. Keep automatic renewal disabled until a
+disposable target has passed a reviewed manual staging exercise.
 
 ### Test fixtures
 

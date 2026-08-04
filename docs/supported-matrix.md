@@ -27,7 +27,7 @@ Legend:
 | Operating system | Windows Server | Evaluate later | Requires separate Service, UI, and installer qualification |
 | Architecture | Windows on ARM64 | Evaluate later | No P0 artifact or emulation promise |
 | Operating system | Linux or macOS | Not P0 | Shared libraries do not imply a supported client |
-| UI | WPF desktop | Pre-alpha source | Live target/evidence view is the default; enrollment remains CLI-only; simulator is secondary |
+| UI | WPF desktop | Pre-alpha source | Multi-site inventory, guided SSH/SFTP connection test, host-identity confirmation, key protection, enrollment, renewal, and evidence are UI-first; simulator is secondary |
 | Background execution | Windows Service | Pre-alpha source; one-run staging evidence | Owns live operations, a basic due-target scan, and durable recovery state; a completed live operation survived a Service stop/start, but production retry/alert policy is incomplete |
 | Secret vault | DPAPI-NG `LOCAL=user` under virtual Service account | Pre-alpha source; qualification pending | Installed logoff/reboot, repair, upgrade, backup/restore, rotation, and uninstall lifecycle remains gated |
 | Address-book import | WinSCP non-secret metadata | P0 target; not implemented | Opt-in preview required; never silently imports or decrypts stored passwords |
@@ -51,9 +51,10 @@ Legend:
 | Area | Platform or method | Status | Notes |
 | --- | --- | --- | --- |
 | Transport | SSH/SFTP through SSH.NET to an OpenSSH-compatible Linux host | Pre-alpha source; one-run staging evidence | Exact-pinned transport passed once; exact host, port, algorithm, SHA-256 fingerprint, and raw-host-key pin are required |
-| Transport | SCP | Not P0 | SFTP is preferred for typed file operations |
+| Transport | SSH/SCP | Registered connector; planned | SCP transfer alone is insufficient; a typed activation, rollback, cleanup, and verification contract is required |
 | Transport | FTP/FTPS | Not P0 | Different trust and credential model |
-| Transport | Hosting-provider API | Evaluate later | Requires a maintained, provider-specific connector |
+| Transport | cPanel, Plesk, or DirectAdmin API | Registered connectors; planned | Each requires a maintained provider-specific authentication, deployment, rollback, and qualification contract |
+| Transport | Other hosting-provider or CDN API | Evaluate later | Requires a maintained provider-specific connector and must manage the actual TLS endpoint |
 | Web server | Nginx fixed-helper layout | Pre-alpha fixture; one-run staging evidence | Root-owned versioned helper, immutable generations, atomic `current` symlink, test/reload, commit, and rollback passed once on an isolated Docker/Nginx target; exact layouts will be narrow |
 | Web server | Apache HTTP Server | Evaluate later | Requires a typed activation and rollback profile |
 | Web server | IIS | Evaluate later | Local Windows server management is a separate connector |

@@ -8,6 +8,48 @@ public sealed class ReadOnlySshProbeTests
 {
     [TestMethod]
     [TestCategory("LiveReadOnly")]
+    public async Task DiscoveryAuthenticatesAndReturnsExpectedServerIdentity()
+    {
+        var settings = ReadSettings();
+        if (settings is null)
+        {
+            Assert.Inconclusive(
+                "Set the CERTBATON_LIVE_SSH_* environment variables to opt in to the read-only SSH probe.");
+            return;
+        }
+
+        var keyBytes = await File.ReadAllBytesAsync(settings.KeyPath)
+            .ConfigureAwait(false);
+        try
+        {
+            using var privateKey = new RemotePrivateKeyMaterial(keyBytes);
+            var endpoint = RemoteSshEndpoint.Create(
+                settings.Host,
+                settings.Port,
+                settings.Username);
+            var probe = new SshNetConnectionProbe();
+
+            var result = await probe.ProbeAsync(
+                endpoint,
+                privateKey,
+                TestContext.CancellationToken);
+
+            Assert.IsTrue(result.AuthenticationSucceeded);
+            Assert.IsTrue(result.SftpAvailable);
+            Assert.AreEqual(settings.HostKeyAlgorithm, result.HostKeyAlgorithm);
+            Assert.AreEqual(
+                settings.HostKeyFingerprint,
+                result.HostKeyFingerprintSha256);
+            Assert.IsNotEmpty(result.HostKeyBase64);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(keyBytes);
+        }
+    }
+
+    [TestMethod]
+    [TestCategory("LiveReadOnly")]
     public async Task EnrolledEndpointCanConnectAndStatConfiguredFile()
     {
         var settings = ReadSettings();

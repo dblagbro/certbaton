@@ -167,9 +167,11 @@
               <RowDefinition Height="Auto" />
               <RowDefinition Height="16" />
               <RowDefinition Height="Auto" />
+              <RowDefinition Height="10" />
+              <RowDefinition Height="150" />
               <RowDefinition Height="14" />
               <RowDefinition Height="Auto" />
-              <RowDefinition Height="16" />
+              <RowDefinition Height="18" />
               <RowDefinition Height="Auto" />
               <RowDefinition Height="16" />
               <RowDefinition Height="Auto" />
@@ -185,51 +187,79 @@
               <StackPanel>
                 <TextBlock FontFamily="Segoe UI Semibold"
                            FontSize="22"
-                           Text="Live certificate renewal" />
+                           Text="Certificate websites" />
                 <TextBlock Margin="0,5,20,0"
                            FontSize="13"
                            Foreground="#526579"
-                           Text="Developer preview: starts a service-owned ACME and SSH deployment workflow for the selected enrolled target."
+                           Text="Add and manage the websites whose certificates CertBaton will renew."
                            TextWrapping="Wrap" />
               </StackPanel>
-              <Border Grid.Column="1"
-                      Padding="10,6"
-                      VerticalAlignment="Top"
-                      Background="#E8F3ED"
-                      CornerRadius="4">
-                <TextBlock FontFamily="Segoe UI Semibold"
-                           FontSize="12"
-                           Foreground="#216B4B"
-                           Text="LIVE WORKFLOW" />
-              </Border>
+              <StackPanel Grid.Column="1"
+                          Orientation="Horizontal"
+                          VerticalAlignment="Top">
+                <Border Margin="0,0,12,0"
+                        Padding="10,6"
+                        VerticalAlignment="Center"
+                        Background="#E8F3ED"
+                        CornerRadius="4">
+                  <TextBlock FontFamily="Segoe UI Semibold"
+                             FontSize="12"
+                             Foreground="#216B4B"
+                             Text="LIVE WORKFLOW" />
+                </Border>
+                <Button AutomationProperties.Name="Add a website to certificate inventory"
+                        Click="AddSite_Click"
+                        Content="Add website" />
+              </StackPanel>
             </Grid>
 
             <Grid Grid.Row="2">
               <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="150" />
-                <ColumnDefinition Width="390" />
-                <ColumnDefinition Width="14" />
-                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
               </Grid.ColumnDefinitions>
-              <StackPanel VerticalAlignment="Center">
-                <TextBlock Style="{StaticResource Caption}" Text="Target inventory" />
-                <TextBlock Margin="0,3,12,0"
-                           Style="{StaticResource Value}"
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock FontFamily="Segoe UI Semibold"
+                           FontSize="15"
+                           Text="Website inventory" />
+                <TextBlock Margin="10,2,0,0"
+                           Style="{StaticResource Caption}"
                            Text="{Binding TargetInventory}" />
               </StackPanel>
-              <ComboBox Grid.Column="1"
-                        AutomationProperties.Name="Choose an enrolled live renewal target"
-                        DisplayMemberPath="DisplayName"
-                        ItemsSource="{Binding Targets}"
-                        SelectedItem="{Binding SelectedTarget, Mode=TwoWay}" />
-              <Button Grid.Column="3"
+              <Button Grid.Column="1"
                       AutomationProperties.Name="Start live certificate renewal for selected target"
                       Command="{Binding StartRenewalCommand}"
                       Content="Start renewal" />
             </Grid>
 
-            <StackPanel Grid.Row="4">
+            <ListView Grid.Row="4"
+                      AutomationProperties.Name="Websites managed by CertBaton"
+                      BorderBrush="#D8E0E7"
+                      BorderThickness="1"
+                      ItemsSource="{Binding Targets}"
+                      SelectedItem="{Binding SelectedTarget, Mode=TwoWay}">
+              <ListView.View>
+                <GridView AllowsColumnReorder="False">
+                  <GridViewColumn Width="225"
+                                  DisplayMemberBinding="{Binding DisplayName}"
+                                  Header="Website" />
+                  <GridViewColumn Width="190"
+                                  DisplayMemberBinding="{Binding Host}"
+                                  Header="Hosting server" />
+                  <GridViewColumn Width="160"
+                                  DisplayMemberBinding="{Binding CertificateAuthority}"
+                                  Header="Certificate service" />
+                  <GridViewColumn Width="105"
+                                  DisplayMemberBinding="{Binding Status}"
+                                  Header="Status" />
+                  <GridViewColumn Width="110"
+                                  DisplayMemberBinding="{Binding AutoRenew}"
+                                  Header="Auto renew" />
+                </GridView>
+              </ListView.View>
+            </ListView>
+
+            <StackPanel Grid.Row="6">
               <TextBlock FontSize="13"
                          Foreground="#526579"
                          Text="{Binding SelectedTargetSummary}"
@@ -237,11 +267,11 @@
               <TextBlock Margin="0,6,0,0"
                          FontSize="12"
                          Foreground="#65788A"
-                         Text="Enrollment wizard is not included in this increment. Use: certbatonctl target enroll --config &lt;path-to-json&gt;"
+                         Text="Use Add website to connect another hosting account, verify it, and place it in this inventory."
                          TextWrapping="Wrap" />
             </StackPanel>
 
-            <Grid Grid.Row="6">
+            <Grid Grid.Row="8">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="430" />
@@ -275,7 +305,7 @@
                   <RowDefinition Height="25" />
                   <RowDefinition Height="25" />
                 </Grid.RowDefinitions>
-                <TextBlock Style="{StaticResource Caption}" Text="Target" />
+                <TextBlock Style="{StaticResource Caption}" Text="Website" />
                 <TextBlock Grid.Column="1"
                            Style="{StaticResource Value}"
                            Text="{Binding LiveTargetName}" />
@@ -297,7 +327,7 @@
               </Grid>
             </Grid>
 
-            <Grid Grid.Row="8">
+            <Grid Grid.Row="10">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
@@ -359,13 +389,13 @@
               </Border>
             </Grid>
 
-            <TextBlock Grid.Row="9"
+            <TextBlock Grid.Row="11"
                        Margin="0,0,0,8"
                        FontFamily="Segoe UI Semibold"
                        FontSize="14"
                        Text="Evidence timeline" />
 
-            <ListView Grid.Row="10"
+            <ListView Grid.Row="12"
                       AutomationProperties.Name="Live renewal evidence timeline"
                       BorderBrush="#D8E0E7"
                       BorderThickness="1"

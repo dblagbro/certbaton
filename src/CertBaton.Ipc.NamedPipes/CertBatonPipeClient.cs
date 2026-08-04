@@ -105,6 +105,36 @@ public sealed class CertBatonPipeClient
                 options.ConnectTimeout),
             cancellationToken);
 
+    public async Task<IpcResponse> ProbeSshConnectionAsync(
+        string host,
+        int port,
+        string username,
+        ReadOnlyMemory<byte> privateKey,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new SshConnectionProbePayload(
+            host,
+            port,
+            username,
+            privateKey.ToArray());
+        var request = IpcRequest.CreateSshConnectionProbe(
+            timeProvider,
+            payload,
+            IpcProtocol.MaximumRequestHorizon);
+        try
+        {
+            return await SendCoreAsync(
+                    request,
+                    IpcProtocol.MaximumRequestHorizon,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload.PrivateKey);
+        }
+    }
+
     public Task<IpcResponse> ListTargetsAsync(
         CancellationToken cancellationToken = default) =>
         SendAsync(
@@ -134,9 +164,15 @@ public sealed class CertBatonPipeClient
                 options.ConnectTimeout),
             cancellationToken);
 
-    public async Task<IpcResponse> SendAsync(
+    public Task<IpcResponse> SendAsync(
         IpcRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        SendCoreAsync(request, null, cancellationToken);
+
+    private async Task<IpcResponse> SendCoreAsync(
+        IpcRequest request,
+        TimeSpan? operationTimeout,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -147,7 +183,7 @@ public sealed class CertBatonPipeClient
         }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(options.ConnectTimeout);
+        timeout.CancelAfter(operationTimeout ?? options.ConnectTimeout);
 
         using var pipe = new NamedPipeClientStream(
             ".",
@@ -187,7 +223,7 @@ public sealed class CertBatonPipeClient
             !cancellationToken.IsCancellationRequested)
         {
             throw new TimeoutException(
-                $"The CertBaton service did not respond within {options.ConnectTimeout.TotalSeconds:0.#} seconds.");
+                $"The CertBaton service did not respond within {(operationTimeout ?? options.ConnectTimeout).TotalSeconds:0.#} seconds.");
         }
     }
 }

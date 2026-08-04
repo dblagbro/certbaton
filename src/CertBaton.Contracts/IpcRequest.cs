@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace CertBaton.Contracts;
 
 public sealed record IpcRequest(
@@ -10,7 +12,9 @@ public sealed record IpcRequest(
     CredentialImportPayload? CredentialPayload = null,
     TargetEnrollmentPayload? TargetEnrollmentPayload = null,
     RenewalStartPayload? RenewalStartPayload = null,
-    RenewalQueryPayload? RenewalQueryPayload = null)
+    RenewalQueryPayload? RenewalQueryPayload = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    SshConnectionProbePayload? SshConnectionProbePayload = null)
 {
     public static IpcRequest CreateHealth(
         TimeProvider timeProvider,
@@ -108,6 +112,25 @@ public sealed record IpcRequest(
             targetEnrollmentPayload: payload);
     }
 
+    public static IpcRequest CreateSshConnectionProbe(
+        TimeProvider timeProvider,
+        SshConnectionProbePayload payload,
+        TimeSpan? timeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        if (!payload.TryValidate(out var error))
+        {
+            throw new ArgumentException(error, nameof(payload));
+        }
+
+        return Create(
+            timeProvider,
+            IpcProtocol.SshConnectionProbeMethod,
+            null,
+            timeout,
+            sshConnectionProbePayload: payload);
+    }
+
     public static IpcRequest CreateTargetList(
         TimeProvider timeProvider,
         TimeSpan? timeout = null) =>
@@ -199,6 +222,20 @@ public sealed record IpcRequest(
 
                 break;
 
+            case IpcProtocol.SshConnectionProbeMethod:
+                if (SshConnectionProbePayload is null || CountPayloads() != 1)
+                {
+                    error = $"Method '{Method}' requires exactly one SSH connection probe payload.";
+                    return false;
+                }
+
+                if (!SshConnectionProbePayload.TryValidate(out error))
+                {
+                    return false;
+                }
+
+                break;
+
             case IpcProtocol.TargetEnrollMethod:
                 if (TargetEnrollmentPayload is null || CountPayloads() != 1)
                 {
@@ -261,6 +298,7 @@ public sealed record IpcRequest(
         SimulationStartPayload? payload,
         TimeSpan? timeout,
         CredentialImportPayload? credentialPayload = null,
+        SshConnectionProbePayload? sshConnectionProbePayload = null,
         TargetEnrollmentPayload? targetEnrollmentPayload = null,
         RenewalStartPayload? renewalStartPayload = null,
         RenewalQueryPayload? renewalQueryPayload = null)
@@ -286,12 +324,14 @@ public sealed record IpcRequest(
             credentialPayload,
             targetEnrollmentPayload,
             renewalStartPayload,
-            renewalQueryPayload);
+            renewalQueryPayload,
+            sshConnectionProbePayload);
     }
 
     private int CountPayloads() =>
         (Payload is null ? 0 : 1) +
         (CredentialPayload is null ? 0 : 1) +
+        (SshConnectionProbePayload is null ? 0 : 1) +
         (TargetEnrollmentPayload is null ? 0 : 1) +
         (RenewalStartPayload is null ? 0 : 1) +
         (RenewalQueryPayload is null ? 0 : 1);

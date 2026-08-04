@@ -8,6 +8,25 @@ namespace CertBaton.Remote.Ssh.Tests;
 public sealed class SshAlgorithmPolicyTests
 {
     [TestMethod]
+    public void DiscoveryKeepsOnlyApprovedModernHostKeyAlgorithms()
+    {
+        var connectionInfo = new ConnectionInfo(
+            "host.example",
+            22,
+            "deploy",
+            new NoneAuthenticationMethod("deploy"));
+
+        SshAlgorithmPolicy.ApplyForDiscovery(connectionInfo);
+
+        Assert.IsGreaterThan(0, connectionInfo.HostKeyAlgorithms.Count);
+        Assert.IsTrue(
+            connectionInfo.HostKeyAlgorithms.Keys.All(
+                SshAlgorithmPolicy.IsAllowedHostKeyAlgorithm));
+        Assert.IsFalse(connectionInfo.HostKeyAlgorithms.ContainsKey("ssh-rsa"));
+        Assert.IsFalse(connectionInfo.HostKeyAlgorithms.ContainsKey("ssh-dss"));
+    }
+
+    [TestMethod]
     public void ApplyRemovesWeakAlgorithmsAndNarrowsHostKeyToPin()
     {
         var key = RandomNumberGenerator.GetBytes(64);

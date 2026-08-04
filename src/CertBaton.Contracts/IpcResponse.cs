@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace CertBaton.Contracts;
 
 public sealed record IpcResponse(
@@ -58,6 +60,24 @@ public sealed record IpcResponse(
             requestId,
             true,
             new IpcResultEnvelope(null, null, null, result),
+            null);
+    }
+
+    public static IpcResponse Succeeded(
+        Guid requestId,
+        SshConnectionProbeSnapshot result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        return new IpcResponse(
+            IpcProtocol.CurrentVersion,
+            requestId,
+            true,
+            new IpcResultEnvelope(
+                null,
+                null,
+                null,
+                SshConnectionProbe: result),
             null);
     }
 
@@ -152,6 +172,7 @@ public sealed record IpcResponse(
             (Result.SimulationRun is null ? 0 : 1) +
             (Result.VaultProbe is null ? 0 : 1) +
             (Result.CredentialImport is null ? 0 : 1) +
+            (Result.SshConnectionProbe is null ? 0 : 1) +
             (Result.Target is null ? 0 : 1) +
             (Result.TargetList is null ? 0 : 1) +
             (Result.RenewalOperation is null ? 0 : 1);
@@ -181,6 +202,20 @@ public sealed record IpcResponse(
                 }
 
                 if (!Result.CredentialImport.TryValidate(out error))
+                {
+                    return false;
+                }
+
+                break;
+
+            case IpcProtocol.SshConnectionProbeMethod:
+                if (Result.SshConnectionProbe is null)
+                {
+                    error = "An SSH/SFTP connection test must return a valid result.";
+                    return false;
+                }
+
+                if (!Result.SshConnectionProbe.TryValidate(out error))
                 {
                     return false;
                 }
@@ -279,7 +314,9 @@ public sealed record IpcResultEnvelope(
     CredentialImportSnapshot? CredentialImport = null,
     TargetSnapshot? Target = null,
     TargetListSnapshot? TargetList = null,
-    RenewalOperationSnapshot? RenewalOperation = null);
+    RenewalOperationSnapshot? RenewalOperation = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    SshConnectionProbeSnapshot? SshConnectionProbe = null);
 
 public sealed record HealthSnapshot(
     string Status,

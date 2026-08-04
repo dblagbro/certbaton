@@ -38,10 +38,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private TargetSnapshot? selectedTarget;
     private string targetInventory = "Targets not loaded";
     private string selectedTargetSummary =
-        "Refresh to load targets enrolled in the Windows service.";
-    private string liveStatus = "Waiting for targets";
+        "Refresh to load websites from the CertBaton service.";
+    private string liveStatus = "Waiting for websites";
     private string liveSummary =
-        "Refresh the service, then select an enrolled target to start a renewal.";
+        "Refresh the service, then select a website to start a renewal.";
     private string liveTargetName = UnavailableValue;
     private string liveOperationId = UnavailableValue;
     private string liveRequested = UnavailableValue;
@@ -207,7 +207,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref selectedTarget, value))
             {
                 SelectedTargetSummary = value is null
-                    ? "No live target is selected."
+                    ? "No website is selected."
                     : BuildTargetSummary(value);
                 StartRenewalCommand.NotifyCanExecuteChanged();
 
@@ -562,9 +562,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
         TargetInventory = Targets.Count switch
         {
-            0 => "No enrolled targets",
-            1 => "1 enrolled target",
-            _ => $"{Targets.Count} enrolled targets",
+            0 => "No websites",
+            1 => "1 website",
+            _ => $"{Targets.Count} websites",
         };
         SelectedTarget = Targets.FirstOrDefault(
                 target => target.TargetId == selectedTargetId) ??
@@ -573,8 +573,8 @@ public sealed class MainWindowViewModel : ObservableObject
         if (Targets.Count == 0 && acceptedOperationId is null)
         {
             SetLiveUnavailable(
-                "No enrolled targets",
-                "Enroll one with: certbatonctl target enroll --config <path-to-json>",
+                "No websites yet",
+                "Choose Add website to connect your hosting account and create the first inventory entry.",
                 isError: false);
         }
 
