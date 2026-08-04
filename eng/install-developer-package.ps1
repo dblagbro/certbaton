@@ -110,7 +110,6 @@ function Assert-NoReparsePointsInTree {
 function Invoke-Sc {
     param(
         [Parameter(Mandatory = $true)]
-        [AllowEmptyString()]
         [string[]] $Arguments,
 
         [switch] $AllowMissing
@@ -792,7 +791,7 @@ function Disable-ServiceStartupAndRestarts {
     Invoke-Sc -Arguments @(
         'failure', $serviceName,
         'reset=', '0',
-        'actions=', ''
+        'actions=', '""'
     ) | Out-Null
     Invoke-Sc -Arguments @(
         'failureflag', $serviceName, '0'
@@ -814,7 +813,7 @@ function Set-ServiceAuditConfiguration {
     Invoke-Sc -Arguments @(
         'failure', $serviceName,
         'reset=', '0',
-        'actions=', ''
+        'actions=', '""'
     ) | Out-Null
     Invoke-Sc -Arguments @(
         'failureflag', $serviceName, '0'
